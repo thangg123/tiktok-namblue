@@ -6,6 +6,7 @@
     <string name="status_connecting">Đang kết nối…</string>
     <string name="status_waiting_live">Đang chờ live…</string>
     <string name="status_reconnecting">Mất kết nối, đang thử lại…</string>
+    <string name="press_back_again">Bấm Back lần nữa để thoát</string>
     <string name="status_loading_facebook">Đang tải Facebook…</string>
     <string name="status_facebook_error">Không tải được Facebook, đang thử lại…</string>
 </resources>

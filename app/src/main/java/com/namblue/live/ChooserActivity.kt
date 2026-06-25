@@ -3,7 +3,9 @@ package com.namblue.live
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
+import android.widget.Toast
 import com.namblue.live.databinding.ActivityChooserBinding
 
 /**
@@ -16,6 +18,7 @@ import com.namblue.live.databinding.ActivityChooserBinding
 class ChooserActivity : Activity() {
 
     private lateinit var binding: ActivityChooserBinding
+    private var lastBackMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,6 +41,19 @@ class ChooserActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
+    @Deprecated("Deprecated in Activity, but the simplest reliable back handling on TV")
+    override fun onBackPressed() {
+        // Press back twice to leave, like other TV apps — avoids exiting by accident.
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBackMs < BACK_EXIT_WINDOW_MS) {
+            super.onBackPressed()
+        } else {
+            lastBackMs = now
+            Toast.makeText(this, R.string.press_back_again, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Suppress("DEPRECATION")
     private fun goFullscreen() {
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -47,5 +63,9 @@ class ChooserActivity : Activity() {
                 or View.SYSTEM_UI_FLAG_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             )
+    }
+
+    companion object {
+        private const val BACK_EXIT_WINDOW_MS = 2_000L
     }
 }
