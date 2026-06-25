@@ -18,7 +18,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center"
         android:padding="16dp"
-        android:text="@string/status_loading_facebook"
+        android:text="@string/status_loading_web"
         android:textColor="@android:color/white"
         android:textSize="22sp" />
 

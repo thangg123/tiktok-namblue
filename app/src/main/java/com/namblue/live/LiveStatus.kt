@@ -17,6 +17,12 @@ sealed interface LiveStatus {
     /** The user exists but is not currently streaming. */
     data object Offline : LiveStatus
 
+    /**
+     * The user IS live, but the stream is gated by TikTok (age/sensitive-content login wall),
+     * so it can't be resolved anonymously — the caller should fall back to a WebView login.
+     */
+    data object Restricted : LiveStatus
+
     /** Status could not be determined (network/parse failure). [message] is for logs only. */
     data class Error(val message: String) : LiveStatus
 }

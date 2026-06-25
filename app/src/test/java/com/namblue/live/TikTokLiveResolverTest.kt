@@ -148,4 +148,16 @@ class TikTokLiveResolverTest {
         val json = """{"data":{"user":{"roomId":"0"}}}"""
         assertNull(TikTokLiveResolver.parseRoomId(json))
     }
+
+    @Test
+    fun `parseIsLive true when status is 2`() {
+        assertTrue(TikTokLiveResolver.parseIsLive("""{"data":{"user":{"status":2},"liveRoom":{"status":2}}}"""))
+        assertTrue(TikTokLiveResolver.parseIsLive("""{"data":{"liveRoom":{"status":2}}}"""))
+    }
+
+    @Test
+    fun `parseIsLive false when offline or missing`() {
+        assertTrue(!TikTokLiveResolver.parseIsLive("""{"data":{"user":{"status":4},"liveRoom":{"status":4}}}"""))
+        assertTrue(!TikTokLiveResolver.parseIsLive("""{"data":null}"""))
+    }
 }

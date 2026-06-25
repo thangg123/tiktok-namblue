@@ -27,23 +27,32 @@ import java.util.concurrent.TimeUnit
  */
 class TikTokLiveResolver(
     private val uniqueId: String = "namblueraudua",
+    private val cookieProvider: () -> String? = { null },
     private val client: OkHttpClient = defaultClient(),
 ) {
 
     suspend fun resolve(): LiveStatus = withContext(Dispatchers.IO) {
         runCatching {
-            val roomId = fetchRoomId(uniqueId)
+            val apiBody = httpGet(
+                "$API_LIVE_BASE?aid=$AID&sourceType=54&uniqueId=$uniqueId",
+                referer = "https://www.tiktok.com/@$uniqueId/live",
+            )
+            val roomId = apiBody?.let { parseRoomId(it) }
+            val isLive = apiBody?.let { parseIsLive(it) } ?: false
+
             if (roomId != null) {
                 return@runCatching when (val viaApi = fetchStreamInfo(roomId)) {
                     is LiveStatus.Live -> viaApi
                     is LiveStatus.Error -> viaApi          // network/HTTP issue -> reconnecting
-                    LiveStatus.Offline -> LiveStatus.Offline
+                    // Live but no stream URL -> TikTok is gating it (age/sensitive) -> WebView login.
+                    LiveStatus.Offline, LiveStatus.Restricted ->
+                        if (isLive) LiveStatus.Restricted else LiveStatus.Offline
                 }
             }
             // No room id at all (never went live / handle changed) -> last-resort HTML scrape.
             when (val viaHtml = resolveFromHtml(uniqueId)) {
                 is LiveStatus.Live -> viaHtml
-                else -> LiveStatus.Offline
+                else -> if (isLive) LiveStatus.Restricted else LiveStatus.Offline
             }
         }.getOrElse { e ->
             LiveStatus.Error(e.message ?: "unknown")
@@ -51,12 +60,6 @@ class TikTokLiveResolver(
     }
 
     // --- Network steps (run inside resolve()'s IO context; OkHttp calls block) ---------------
-
-    private fun fetchRoomId(uniqueId: String): String? {
-        val url = "$API_LIVE_BASE?aid=$AID&sourceType=54&uniqueId=$uniqueId"
-        val body = httpGet(url, referer = "https://www.tiktok.com/@$uniqueId/live") ?: return null
-        return parseRoomId(body)
-    }
 
     private fun fetchStreamInfo(roomId: String): LiveStatus {
         val url = "$WEBCAST_INFO_BASE?aid=$AID&room_id=$roomId"
@@ -73,14 +76,16 @@ class TikTokLiveResolver(
 
     /** Returns the body on 2xx, null on other status codes; rethrows real network failures. */
     private fun httpGet(url: String, referer: String): String? {
-        val request = Request.Builder()
+        val builder = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)
             .header("Referer", referer)
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "en-US,en;q=0.9")
-            .build()
-        client.newCall(request).execute().use { response ->
+        // Send the logged-in session cookie (from the WebView login) so gated/age-restricted
+        // lives resolve natively. Harmless when logged out (cookie is null).
+        cookieProvider()?.takeIf { it.isNotBlank() }?.let { builder.header("Cookie", it) }
+        client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) return null
             return response.body?.string()
         }
@@ -115,6 +120,14 @@ class TikTokLiveResolver(
             val roomId = fromUser.ifBlank { data.optString("roomId", "") }
             roomId.takeIf { it.isNotBlank() && it != "0" }
         }.getOrNull()
+
+        /** True when api-live says the user is live now (status == 2). Pure; unit-tested. */
+        fun parseIsLive(jsonText: String): Boolean = runCatching {
+            val data = JSONObject(jsonText).optJSONObject("data") ?: return false
+            val liveStatus = data.optJSONObject("liveRoom")?.optInt("status", -1) ?: -1
+            val userStatus = data.optJSONObject("user")?.optInt("status", -1) ?: -1
+            liveStatus == 2 || userStatus == 2
+        }.getOrDefault(false)
 
         /**
          * Find a playable stream URL anywhere in [jsonText]. Pure; unit-tested.

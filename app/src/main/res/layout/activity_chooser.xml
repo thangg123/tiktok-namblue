@@ -11,14 +11,14 @@
         android:orientation="horizontal">
 
         <Button
-            android:id="@+id/btnTiktok"
+            android:id="@+id/btnNamblue"
             android:layout_width="300dp"
             android:layout_height="140dp"
             android:background="@drawable/btn_chooser_bg"
             android:focusable="true"
             android:focusedByDefault="true"
-            android:nextFocusRight="@+id/btnFacebook"
-            android:text="@string/source_tiktok"
+            android:nextFocusRight="@+id/btnOther"
+            android:text="@string/source_namblue"
             android:textAllCaps="false"
             android:textColor="@color/btn_chooser_text"
             android:textSize="30sp"
@@ -29,13 +29,13 @@
             android:layout_height="match_parent" />
 
         <Button
-            android:id="@+id/btnFacebook"
+            android:id="@+id/btnOther"
             android:layout_width="300dp"
             android:layout_height="140dp"
             android:background="@drawable/btn_chooser_bg"
             android:focusable="true"
-            android:nextFocusLeft="@+id/btnTiktok"
-            android:text="@string/source_facebook"
+            android:nextFocusLeft="@+id/btnNamblue"
+            android:text="@string/source_other"
             android:textAllCaps="false"
             android:textColor="@color/btn_chooser_text"
             android:textSize="30sp"

@@ -26,9 +26,9 @@ class ChooserActivity : Activity() {
         setContentView(binding.root)
         goFullscreen()
 
-        binding.btnTiktok.setOnClickListener { startActivity(Intent(this, PlayerActivity::class.java)) }
-        binding.btnFacebook.setOnClickListener { startActivity(Intent(this, FacebookWebActivity::class.java)) }
-        binding.btnTiktok.requestFocus()
+        binding.btnNamblue.setOnClickListener { startActivity(Intent(this, PlayerActivity::class.java)) }
+        binding.btnOther.setOnClickListener { startActivity(Intent(this, UsernameActivity::class.java)) }
+        binding.btnNamblue.requestFocus()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -36,7 +36,7 @@ class ChooserActivity : Activity() {
         if (hasFocus) {
             goFullscreen()
             // A TV screen must always show where the cursor is — keep a button focused.
-            if (currentFocus == null) binding.btnTiktok.requestFocus()
+            if (currentFocus == null) binding.btnNamblue.requestFocus()
         }
     }
 

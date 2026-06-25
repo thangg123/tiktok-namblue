@@ -1,6 +1,8 @@
 package com.namblue.live
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -15,19 +17,22 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import com.namblue.live.databinding.ActivityFacebookBinding
+import com.namblue.live.databinding.ActivityWebPlayerBinding
 
 /**
- * Facebook live via WebView.
+ * Watches a TikTok live page in a WebView, driven by a TV remote.
  *
- * Facebook's in-progress live uses a rolling DASH manifest that can't be sustained natively for
- * a logged-out request, so the most reliable way to actually watch a public page's live on a TV
- * is to let Facebook's own web player handle it. JavaScript autoplay is enabled and HTML5 video
- * can go fullscreen. Cookies persist, so if Facebook requires a login you only do it once.
+ * Used for age/sensitive-gated lives that TikTok won't serve anonymously: the native path can't
+ * resolve those, so we hand off to TikTok's own web player where the user logs in + confirms age.
+ *
+ * The web page isn't D-pad-navigable, so an on-screen pointer is driven with the remote
+ * (arrows move it, OK taps, top/bottom edges scroll). JavaScript autoplay is on and HTML5
+ * video can go fullscreen. Cookies persist, so any login is only done once — after a TikTok
+ * login, the native resolver reuses those cookies and can play gated lives natively.
  */
-class FacebookWebActivity : android.app.Activity() {
+class WebPlayerActivity : android.app.Activity() {
 
-    private lateinit var binding: ActivityFacebookBinding
+    private lateinit var binding: ActivityWebPlayerBinding
 
     // Holder for an HTML5 video that requests fullscreen.
     private var customView: View? = null
@@ -36,7 +41,7 @@ class FacebookWebActivity : android.app.Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityFacebookBinding.inflate(layoutInflater)
+        binding = ActivityWebPlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         goFullscreen()
@@ -56,7 +61,7 @@ class FacebookWebActivity : android.app.Activity() {
         }
 
         if (savedInstanceState == null) {
-            binding.webView.loadUrl(LIVE_URL)
+            binding.webView.loadUrl(intent.getStringExtra(EXTRA_URL) ?: DEFAULT_URL)
         }
 
         binding.root.post { centerCursor() }
@@ -64,10 +69,10 @@ class FacebookWebActivity : android.app.Activity() {
 
     // --- D-pad pointer ----------------------------------------------------------------------
     //
-    // Facebook's web page is not D-pad-navigable, so we drive an on-screen pointer with the
-    // remote (like a TV browser): arrows move it, OK taps the page at the pointer, and pushing
-    // past the top/bottom edge scrolls. This is how you close the "log in" card (the X button)
-    // and click into the live video without a touchscreen.
+    // The web page is not D-pad-navigable, so we drive an on-screen pointer with the remote
+    // (like a TV browser): arrows move it, OK taps the page at the pointer, and pushing past
+    // the top/bottom edge scrolls. This closes the "log in"/warning card (the X / Continue)
+    // and clicks into the live video without a touchscreen.
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // While an HTML5 video is fullscreen, let keys flow to the player instead.
@@ -146,7 +151,7 @@ class FacebookWebActivity : android.app.Activity() {
 
     override fun onPause() {
         super.onPause()
-        binding.webView.onPause()           // stop the FB video/audio when backgrounded
+        binding.webView.onPause()           // stop the video/audio when backgrounded
         CookieManager.getInstance().flush()  // persist the login session to disk
     }
 
@@ -199,7 +204,7 @@ class FacebookWebActivity : android.app.Activity() {
     private fun statusWebViewClient() = object : WebViewClient() {
         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
             Log.i(TAG, "page started: $url")
-            showStatus(getString(R.string.status_loading_facebook))
+            showStatus(getString(R.string.status_loading_web))
         }
 
         override fun onPageFinished(view: WebView?, url: String?) {
@@ -210,7 +215,7 @@ class FacebookWebActivity : android.app.Activity() {
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
             if (request?.isForMainFrame == true) {
                 Log.w(TAG, "main-frame error: ${error?.errorCode} ${error?.description}")
-                showStatus(getString(R.string.status_facebook_error))
+                showStatus(getString(R.string.status_web_error))
             }
         }
     }
@@ -239,8 +244,9 @@ class FacebookWebActivity : android.app.Activity() {
     }
 
     companion object {
-        private const val TAG = "FBWeb"
-        private const val LIVE_URL = "https://www.facebook.com/namblue/live"
+        private const val TAG = "WebPlayer"
+        const val EXTRA_URL = "url"
+        private const val DEFAULT_URL = "https://www.tiktok.com/@namblueraudua/live"
 
         // Pointer movement tuning (pixels).
         private const val CURSOR_STEP = 55f          // base move per key press
@@ -248,5 +254,8 @@ class FacebookWebActivity : android.app.Activity() {
         private const val CURSOR_STEP_MAX = 260f     // cap on the accelerated step
         private const val CURSOR_MARGIN = 8          // keep the tip on-screen
         private const val CURSOR_TIP = 4f            // offset of the arrow tip from the view origin
+
+        fun intent(context: Context, url: String): Intent =
+            Intent(context, WebPlayerActivity::class.java).putExtra(EXTRA_URL, url)
     }
 }

@@ -43,7 +43,15 @@
             android:screenOrientation="landscape" />
 
         <activity
-            android:name=".FacebookWebActivity"
+            android:name=".UsernameActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="stateVisible|adjustResize" />
+
+        <activity
+            android:name=".WebPlayerActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|navigation"
             android:exported="false"
             android:launchMode="singleTop"

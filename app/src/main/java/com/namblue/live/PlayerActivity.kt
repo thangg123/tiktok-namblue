@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
+import android.webkit.CookieManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -34,7 +35,19 @@ import kotlinx.coroutines.launch
 class PlayerActivity : Activity() {
 
     private lateinit var binding: ActivityPlayerBinding
-    private val resolver = TikTokLiveResolver()
+
+    /** TikTok handle to watch; defaults to NamBlue, overridable via [EXTRA_USERNAME]. */
+    private val username: String by lazy {
+        intent.getStringExtra(EXTRA_USERNAME)?.takeIf { it.isNotBlank() } ?: DEFAULT_USERNAME
+    }
+
+    // Reuse the WebView's TikTok login cookies so age/sensitive-gated lives resolve natively.
+    private val resolver: TikTokLiveResolver by lazy {
+        TikTokLiveResolver(
+            uniqueId = username,
+            cookieProvider = { CookieManager.getInstance().getCookie(TIKTOK_HOME) },
+        )
+    }
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var player: ExoPlayer? = null
@@ -112,6 +125,17 @@ class PlayerActivity : Activity() {
                         stopPlayback()
                         showStatus(getString(R.string.status_reconnecting))
                         delay(RETRY_DELAY_MS)
+                    }
+
+                    // Live but TikTok gates it (age/sensitive): hand off to the WebView so the
+                    // user can log in + confirm age. After that the resolver reuses those cookies
+                    // and this native screen can play it directly next time.
+                    LiveStatus.Restricted -> {
+                        stopPlayback()
+                        showStatus(getString(R.string.status_restricted))
+                        startActivity(WebPlayerActivity.intent(this@PlayerActivity, "https://www.tiktok.com/@$username/live"))
+                        finish()
+                        return@launch
                     }
                 }
             }
@@ -207,7 +231,10 @@ class PlayerActivity : Activity() {
     }
 
     companion object {
+        const val EXTRA_USERNAME = "username"
+        private const val DEFAULT_USERNAME = "namblueraudua"
         private const val RETRY_DELAY_MS = 10_000L     // when offline / network error
         private const val RECONNECT_DELAY_MS = 2_000L  // brief pause after a live drops
+        private const val TIKTOK_HOME = "https://www.tiktok.com"
     }
 }

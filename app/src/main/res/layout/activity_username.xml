@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <LinearLayout
+        android:layout_width="560dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            android:text="@string/enter_username_title"
+            android:textColor="@android:color/white"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/usernameInput"
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:background="@drawable/input_bg"
+            android:gravity="center_vertical"
+            android:hint="@string/enter_username_hint"
+            android:imeOptions="actionGo"
+            android:importantForAutofill="no"
+            android:inputType="textNoSuggestions"
+            android:nextFocusDown="@+id/btnWatch"
+            android:paddingHorizontal="20dp"
+            android:singleLine="true"
+            android:textColor="@android:color/white"
+            android:textColorHint="#9FB3C8"
+            android:textSize="24sp" />
+
+        <Button
+            android:id="@+id/btnWatch"
+            android:layout_width="match_parent"
+            android:layout_height="96dp"
+            android:layout_marginTop="20dp"
+            android:background="@drawable/btn_chooser_bg"
+            android:focusable="true"
+            android:nextFocusUp="@+id/usernameInput"
+            android:text="@string/watch"
+            android:textAllCaps="false"
+            android:textColor="@color/btn_chooser_text"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</FrameLayout>

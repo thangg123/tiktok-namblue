@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NamBlue Live</string>
-    <string name="source_tiktok">TikTok</string>
-    <string name="source_facebook">Facebook</string>
+    <string name="source_namblue">NamBlue</string>
+    <string name="source_other">Other</string>
+    <string name="enter_username_title">Nhập username TikTok</string>
+    <string name="enter_username_hint">vd: namblueraudua (không có @)</string>
+    <string name="watch">Xem</string>
     <string name="status_connecting">Đang kết nối…</string>
     <string name="status_waiting_live">Đang chờ live…</string>
     <string name="status_reconnecting">Mất kết nối, đang thử lại…</string>
+    <string name="status_restricted">Live giới hạn độ tuổi — mở TikTok để đăng nhập…</string>
     <string name="press_back_again">Bấm Back lần nữa để thoát</string>
-    <string name="status_loading_facebook">Đang tải Facebook…</string>
-    <string name="status_facebook_error">Không tải được Facebook, đang thử lại…</string>
+    <string name="status_loading_web">Đang tải…</string>
+    <string name="status_web_error">Không tải được, đang thử lại…</string>
 </resources>
