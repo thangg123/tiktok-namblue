@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV banner (xhdpi 320x180dp). Vector so no PNGs are needed. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="#0B1622"
+        android:pathData="M0,0 H320 V180 H0 Z" />
+    <path
+        android:fillColor="#22A7F0"
+        android:pathData="M132,62 L132,118 L186,90 Z" />
+</vector>

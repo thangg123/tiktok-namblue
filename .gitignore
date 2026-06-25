@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+app/build/
+build/
+.playwright-mcp/
+# Signing — never commit the keystore or its passwords
+*.jks
+*.keystore
+keystore.properties

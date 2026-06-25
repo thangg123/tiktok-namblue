@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NamBlue Live</string>
+    <string name="source_tiktok">TikTok</string>
+    <string name="source_facebook">Facebook</string>
+    <string name="status_connecting">Đang kết nối…</string>
+    <string name="status_waiting_live">Đang chờ live…</string>
+    <string name="status_reconnecting">Mất kết nối, đang thử lại…</string>
+    <string name="status_loading_facebook">Đang tải Facebook…</string>
+    <string name="status_facebook_error">Không tải được Facebook, đang thử lại…</string>
+</resources>

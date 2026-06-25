@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnTiktok"
+            android:layout_width="300dp"
+            android:layout_height="140dp"
+            android:background="@drawable/btn_chooser_bg"
+            android:focusable="true"
+            android:focusedByDefault="true"
+            android:nextFocusRight="@+id/btnFacebook"
+            android:text="@string/source_tiktok"
+            android:textAllCaps="false"
+            android:textColor="@color/btn_chooser_text"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <Space
+            android:layout_width="48dp"
+            android:layout_height="match_parent" />
+
+        <Button
+            android:id="@+id/btnFacebook"
+            android:layout_width="300dp"
+            android:layout_height="140dp"
+            android:background="@drawable/btn_chooser_bg"
+            android:focusable="true"
+            android:nextFocusLeft="@+id/btnTiktok"
+            android:text="@string/source_facebook"
+            android:textAllCaps="false"
+            android:textColor="@color/btn_chooser_text"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</FrameLayout>
