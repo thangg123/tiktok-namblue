@@ -13,6 +13,8 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.namblue.live.databinding.ActivityPlayerBinding
@@ -174,10 +176,27 @@ class PlayerActivity : Activity() {
             .setUserAgent(TikTokLiveResolver.USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(10_000)
-            .setReadTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
 
-        val exo = ExoPlayer.Builder(this)
+        // Keep the highest quality (origin) but play it as smoothly as possible on weak TV
+        // hardware: a generous time-based buffer absorbs the high bitrate + network jitter, and
+        // decoder fallback avoids a hard stall if the hardware decoder chokes on the source profile.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 30_000,
+                /* maxBufferMs = */ 60_000,
+                /* bufferForPlaybackMs = */ 3_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 6_000,
+            )
+            .setPrioritizeTimeOverSizeThresholds(true) // buffer by time, not bytes — vital at high bitrate
+            .build()
+
+        val renderersFactory = DefaultRenderersFactory(this)
+            .setEnableDecoderFallback(true)
+
+        val exo = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(httpFactory))
+            .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
