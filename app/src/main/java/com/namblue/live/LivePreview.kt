@@ -26,6 +26,8 @@ class LivePreview(
     private val playerView: PlayerView,
     private val scope: CoroutineScope,
     private val onState: (State) -> Unit,
+    /** The previewed creator's profile, read from the same lookup that found the stream. */
+    private val onProfile: (username: String, LiveProfile) -> Unit = { _, _ -> },
 ) {
 
     enum class State { LOADING, PLAYING, OFFLINE, RESTRICTED, FAILED }
@@ -96,11 +98,14 @@ class LivePreview(
 
     /** Resolve [username]'s stream (fresh signed URL each time) and start it. */
     private suspend fun play(username: String) {
+        var profile: LiveProfile? = null
         val status = TikTokLiveResolver(
             uniqueId = username,
             cookieProvider = { CookieManager.getInstance().getCookie(TIKTOK_ORIGIN) },
+            profileSink = { profile = it },
         ).resolve(allowSourceUpgrade = false)
         if (username != current) return // the cursor moved on while resolving
+        profile?.let { onProfile(username, it) }
         when (status) {
             is LiveStatus.Live -> player?.run {
                 setMediaItem(LivePlayers.mediaItem(status))

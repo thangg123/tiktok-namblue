@@ -58,7 +58,7 @@ class LiveListActivity : Activity() {
         setContentView(binding.root)
         binding.previewFrame.clipToOutline = true
         reader = LivePageReader(binding.scrapeView).also { it.setUp() }
-        preview = LivePreview(this, binding.previewView, uiScope, ::showPreviewState)
+        preview = LivePreview(this, binding.previewView, uiScope, ::showPreviewState, ::onProfile)
         renderChips()
         load(recommended)
     }
@@ -236,19 +236,49 @@ class LiveListActivity : Activity() {
 
     private fun card(channel: LiveChannel, index: Int): View {
         val item = ItemLiveChannelBinding.inflate(layoutInflater, binding.grid, false)
-        item.nickname.text = channel.nickname
-        item.detail.text = channel.viewers?.let { getString(R.string.live_list_viewers, it) }
-            ?: getString(R.string.history_item, channel.username)
         item.avatar.clipToOutline = true
-        channel.avatarUrl?.let { url -> uiScope.launch { avatars.load(url)?.let(item.avatar::setImageBitmap) } }
+        bindCard(item, channel)
         item.root.layoutParams = GridLayout.LayoutParams().apply {
             width = cardWidth
             val gap = dp(CARD_GAP_DP)
             setMargins(gap, gap, gap, gap)
         }
-        item.root.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) onCardFocused(channel, index) }
+        // Look the channel up on focus: details may have been filled in since the card was made.
+        item.root.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) onCardFocused(channels.getOrNull(index) ?: channel, index)
+        }
         item.root.setOnClickListener { watch(channel.username) }
         return item.root
+    }
+
+    private fun bindCard(item: ItemLiveChannelBinding, channel: LiveChannel) {
+        item.nickname.text = channel.nickname
+        item.detail.text = channel.viewers?.let { getString(R.string.live_list_viewers, it) }
+            ?: getString(R.string.history_item, channel.username)
+        // Until (or unless) a photo arrives, the circle shows the nickname's first letter.
+        item.avatarInitial.text = channel.nickname.firstOrNull { it.isLetterOrDigit() }?.uppercase().orEmpty()
+        channel.avatarUrl?.let { url ->
+            uiScope.launch {
+                avatars.load(url)?.let {
+                    item.avatar.setImageBitmap(it)
+                    item.avatarInitial.text = ""
+                }
+            }
+        }
+    }
+
+    /** Fill the previewed card's gaps from the profile the preview's lookup returned. */
+    private fun onProfile(username: String, profile: LiveProfile) {
+        val index = channels.indexOfFirst { it.username == username }
+        if (index < 0) return
+        val filled = LiveProfiles.merge(channels[index], profile)
+        if (filled == channels[index]) return
+        channels = channels.toMutableList().also { it[index] = filled }.toList()
+        binding.grid.getChildAt(index)?.let { bindCard(ItemLiveChannelBinding.bind(it), filled) }
+        if (focused?.username == username) {
+            focused = filled
+            showHero(filled)
+        }
     }
 
     private fun onCardFocused(channel: LiveChannel, index: Int) {

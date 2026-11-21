@@ -31,6 +31,8 @@ class TikTokLiveResolver(
     private val cookieProvider: () -> String? = { null },
     /** Whether this device can decode H.265 — source-quality streams are often H.265. */
     private val canDecodeHevc: () -> Boolean = { false },
+    /** Receives the creator's profile from the lookup the resolver makes anyway (no extra request). */
+    private val profileSink: (LiveProfile) -> Unit = {},
     private val client: OkHttpClient = defaultClient(),
 ) {
 
@@ -46,6 +48,7 @@ class TikTokLiveResolver(
             )
             val roomId = apiBody?.let { parseRoomId(it) }
             val isLive = apiBody?.let { parseIsLive(it) } ?: false
+            LiveProfiles.parse(apiBody)?.let(profileSink)
 
             if (roomId != null) {
                 return@runCatching when (val viaApi = fetchStreamInfo(roomId, allowSourceUpgrade)) {

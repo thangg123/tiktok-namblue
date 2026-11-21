@@ -11,13 +11,27 @@
     android:paddingHorizontal="10dp"
     android:paddingVertical="12dp">
 
-    <ImageView
-        android:id="@+id/avatar"
+    <FrameLayout
         android:layout_width="60dp"
-        android:layout_height="60dp"
-        android:background="@drawable/avatar_bg"
-        android:contentDescription="@null"
-        android:scaleType="centerCrop" />
+        android:layout_height="60dp">
+
+        <ImageView
+            android:id="@+id/avatar"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/avatar_bg"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop" />
+
+        <TextView
+            android:id="@+id/avatarInitial"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textColor="#9FB3C8"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/nickname"
