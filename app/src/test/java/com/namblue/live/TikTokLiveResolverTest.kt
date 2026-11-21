@@ -116,6 +116,99 @@ class TikTokLiveResolverTest {
         return org.json.JSONObject().put("data", org.json.JSONObject().put("stream_url", streamUrl)).toString()
     }
 
+    // --- extractSourceCandidate: the unlisted raw source behind the audio-only entry --------
+
+    @Test
+    fun `source candidate is the audio-only flv without its only_audio flag when origin is unlisted`() {
+        // Real shape: the ladder lists only a 720p transcode, but "ao" points at the unsuffixed
+        // source stream with &only_audio=1 appended.
+        val hd = quality(res = "1280x720", vbitrate = 1_800_000, hls = "https://x/s_hd/index.m3u8", flv = "https://x/s_hd.flv?expire=1&sign=a")
+        val ao = quality(res = "", vbitrate = 0, hls = null, flv = "https://x/s.flv?expire=1&sign=b&only_audio=1")
+        val streamData = org.json.JSONObject().put("data", org.json.JSONObject().put("hd", hd).put("ao", ao))
+        val roomInfo = roomInfoWith(defaultHls = null, streamData = streamData.toString())
+
+        assertEquals("https://x/s.flv?expire=1&sign=b", TikTokLiveResolver.extractSourceCandidate(roomInfo))
+    }
+
+    @Test
+    fun `no source candidate when origin is already listed`() {
+        val origin = quality(res = "1920x1080", vbitrate = 0, hls = null, flv = "https://x/s.flv?expire=1&sign=b")
+        val ao = quality(res = "", vbitrate = 0, hls = null, flv = "https://x/s.flv?expire=1&sign=b&only_audio=1")
+        val streamData = org.json.JSONObject().put("data", org.json.JSONObject().put("origin", origin).put("ao", ao))
+        val roomInfo = roomInfoWith(defaultHls = null, streamData = streamData.toString())
+
+        assertNull(TikTokLiveResolver.extractSourceCandidate(roomInfo))
+    }
+
+    @Test
+    fun `no source candidate without an audio-only entry or without stream_data`() {
+        val hd = quality(res = "1280x720", vbitrate = 1_800_000, hls = null, flv = "https://x/s_hd.flv?expire=1&sign=a")
+        val streamData = org.json.JSONObject().put("data", org.json.JSONObject().put("hd", hd))
+
+        assertNull(TikTokLiveResolver.extractSourceCandidate(roomInfoWith(defaultHls = null, streamData = streamData.toString())))
+        assertNull(TikTokLiveResolver.extractSourceCandidate("""{"status_code":0,"data":{"status":4}}"""))
+        assertNull(TikTokLiveResolver.extractSourceCandidate("Captcha required"))
+    }
+
+    @Test
+    fun `stripAudioOnly removes the flag wherever it sits in the query`() {
+        assertEquals("https://x/s.flv?expire=1&sign=b", TikTokLiveResolver.stripAudioOnly("https://x/s.flv?expire=1&sign=b&only_audio=1"))
+        assertEquals("https://x/s.flv?expire=1&sign=b", TikTokLiveResolver.stripAudioOnly("https://x/s.flv?only_audio=1&expire=1&sign=b"))
+        assertEquals("https://x/s.flv?expire=1&sign=b", TikTokLiveResolver.stripAudioOnly("https://x/s.flv?expire=1&only_audio=1&sign=b"))
+        assertEquals("https://x/s.flv", TikTokLiveResolver.stripAudioOnly("https://x/s.flv?only_audio=1"))
+    }
+
+    @Test
+    fun `stripAudioOnly returns null when the url is not an audio-only flv`() {
+        assertNull(TikTokLiveResolver.stripAudioOnly("https://x/s.flv?expire=1&sign=b"))
+        assertNull(TikTokLiveResolver.stripAudioOnly("https://x/s/index.m3u8?only_audio=1"))
+        assertNull(TikTokLiveResolver.stripAudioOnly(""))
+    }
+
+    // --- flvVideoCodec: which codec the candidate stream really carries ---------------------
+
+    @Test
+    fun `flvVideoCodec reads the codec id of the first video tag`() {
+        // Layout captured from TikTok's CDN: script tag, audio config, then the first video tag
+        // whose first body byte is frame type (high nibble) + codec id (low nibble).
+        val h264 = flv(18 to ByteArray(300), 8 to byteArrayOf(0xAF.toByte(), 0), 9 to byteArrayOf(0x17, 0, 0, 0, 0))
+        val h265 = flv(18 to ByteArray(300), 8 to byteArrayOf(0xAF.toByte(), 0), 9 to byteArrayOf(0x1C, 0, 0, 0, 0))
+
+        assertEquals(7, TikTokLiveResolver.flvVideoCodec(h264))
+        assertEquals(12, TikTokLiveResolver.flvVideoCodec(h265))
+    }
+
+    @Test
+    fun `flvVideoCodec is null for an audio-only stream`() {
+        val audioOnly = flv(18 to ByteArray(300), 8 to byteArrayOf(0xAF.toByte(), 0), 8 to ByteArray(500), 8 to ByteArray(500))
+
+        assertNull(TikTokLiveResolver.flvVideoCodec(audioOnly))
+    }
+
+    @Test
+    fun `flvVideoCodec is null for bodies that are not FLV or are cut short`() {
+        val cutInsideVideoTagHeader = flv(18 to ByteArray(300), 9 to byteArrayOf(0x17)).let { it.copyOf(it.size - 6) }
+
+        assertNull(TikTokLiveResolver.flvVideoCodec("<html>403</html>".toByteArray()))
+        assertNull(TikTokLiveResolver.flvVideoCodec(ByteArray(0)))
+        assertNull(TikTokLiveResolver.flvVideoCodec(cutInsideVideoTagHeader))
+    }
+
+    /** Minimal FLV byte stream: file header, then each (tag type, body) with its framing. */
+    private fun flv(vararg tags: Pair<Int, ByteArray>): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(byteArrayOf('F'.code.toByte(), 'L'.code.toByte(), 'V'.code.toByte(), 1, 0x05, 0, 0, 0, 9))
+        out.write(ByteArray(4)) // PreviousTagSize0
+        for ((type, body) in tags) {
+            out.write(type)
+            out.write(byteArrayOf((body.size shr 16).toByte(), (body.size shr 8).toByte(), body.size.toByte()))
+            out.write(ByteArray(7)) // timestamp (3) + extended timestamp (1) + stream id (3)
+            out.write(body)
+            out.write(ByteArray(4)) // PreviousTagSize
+        }
+        return out.toByteArray()
+    }
+
     @Test
     fun `no stream urls anywhere yields Offline`() {
         val json = """{"status_code":0,"data":{"status":4,"title":"hello"}}"""

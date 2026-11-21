@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
  *   1. GET api-live/user/room  -> data.user.roomId
  *   2. GET webcast/room/info   -> data.stream_url.hls_pull_url (.m3u8) / flv_pull_url {HD1,SD1}
  *   3. Fallback: scrape the /@user/live page for embedded stream JSON.
+ *   4. Upgrade: if the ladder omits the raw source, try the unlisted one (see [upgradedToSource]).
  *
  * Liveness is decided by the *presence of a non-empty stream URL*, not by the
  * unreliable integer `status` field. Playback URLs are signed/expiring, so callers
@@ -28,10 +29,16 @@ import java.util.concurrent.TimeUnit
 class TikTokLiveResolver(
     private val uniqueId: String = "namblueraudua",
     private val cookieProvider: () -> String? = { null },
+    /** Whether this device can decode H.265 — source-quality streams are often H.265. */
+    private val canDecodeHevc: () -> Boolean = { false },
     private val client: OkHttpClient = defaultClient(),
 ) {
 
-    suspend fun resolve(): LiveStatus = withContext(Dispatchers.IO) {
+    /**
+     * [allowSourceUpgrade] = false returns only the qualities TikTok lists, skipping the unlisted
+     * source — the caller's way out when that source will not decode on this device.
+     */
+    suspend fun resolve(allowSourceUpgrade: Boolean = true): LiveStatus = withContext(Dispatchers.IO) {
         runCatching {
             val apiBody = httpGet(
                 "$API_LIVE_BASE?aid=$AID&sourceType=54&uniqueId=$uniqueId",
@@ -41,7 +48,7 @@ class TikTokLiveResolver(
             val isLive = apiBody?.let { parseIsLive(it) } ?: false
 
             if (roomId != null) {
-                return@runCatching when (val viaApi = fetchStreamInfo(roomId)) {
+                return@runCatching when (val viaApi = fetchStreamInfo(roomId, allowSourceUpgrade)) {
                     is LiveStatus.Live -> viaApi
                     is LiveStatus.Error -> viaApi          // network/HTTP issue -> reconnecting
                     // Live but no stream URL -> TikTok is gating it (age/sensitive) -> WebView login.
@@ -50,7 +57,7 @@ class TikTokLiveResolver(
                 }
             }
             // No room id at all (never went live / handle changed) -> last-resort HTML scrape.
-            when (val viaHtml = resolveFromHtml(uniqueId)) {
+            when (val viaHtml = resolveFromHtml(uniqueId, allowSourceUpgrade)) {
                 is LiveStatus.Live -> viaHtml
                 else -> if (isLive) LiveStatus.Restricted else LiveStatus.Offline
             }
@@ -61,17 +68,59 @@ class TikTokLiveResolver(
 
     // --- Network steps (run inside resolve()'s IO context; OkHttp calls block) ---------------
 
-    private fun fetchStreamInfo(roomId: String): LiveStatus {
+    private fun fetchStreamInfo(roomId: String, allowSourceUpgrade: Boolean): LiveStatus {
         val url = "$WEBCAST_INFO_BASE?aid=$AID&room_id=$roomId"
         val body = httpGet(url, referer = "https://www.tiktok.com/") ?: return LiveStatus.Error("room/info HTTP error")
-        return extractLive(body)
+        return liveFrom(body, allowSourceUpgrade)
     }
 
-    private fun resolveFromHtml(uniqueId: String): LiveStatus {
+    private fun resolveFromHtml(uniqueId: String, allowSourceUpgrade: Boolean): LiveStatus {
         val url = "https://www.tiktok.com/@$uniqueId/live"
         val html = httpGet(url, referer = "https://www.tiktok.com/") ?: return LiveStatus.Error("live page HTTP error")
         val json = extractEmbeddedJson(html) ?: return LiveStatus.Offline
-        return extractLive(json)
+        return liveFrom(json, allowSourceUpgrade)
+    }
+
+    private fun liveFrom(body: String, allowSourceUpgrade: Boolean): LiveStatus {
+        val listed = extractLive(body)
+        if (listed !is LiveStatus.Live || !allowSourceUpgrade) return listed
+        return upgradedToSource(body) ?: listed
+    }
+
+    /**
+     * TikTok often lists only transcodes (e.g. 720p) and leaves the raw source out of the ladder,
+     * yet the audio-only entry is that same source with `only_audio=1` appended. Dropping the flag
+     * yields the full-quality stream (measured: 1080p 6 Mbps where only 720p 1.8 Mbps was listed).
+     * This is undocumented, so the URL is used only after the CDN proves it serves video there in
+     * a codec this device can play (the source is often H.265 at 60 fps, unlike the transcodes).
+     */
+    private fun upgradedToSource(body: String): LiveStatus.Live? {
+        val candidate = extractSourceCandidate(body) ?: return null
+        val playable = when (probeVideoCodec(candidate)) {
+            FLV_CODEC_AVC -> true
+            FLV_CODEC_HEVC -> canDecodeHevc()
+            else -> false
+        }
+        return if (playable) LiveStatus.Live(candidate, StreamType.PROGRESSIVE) else null
+    }
+
+    /** Read the first bytes of the FLV at [url] to learn its video codec; null on any failure. */
+    private fun probeVideoCodec(url: String): Int? = runCatching {
+        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
+        probeClient.newCall(request).execute().use { response ->
+            val source = response.body?.source()
+            if (!response.isSuccessful || source == null) return@use null
+            source.request(PROBE_BYTES) // false just means the stream ended early; use what came
+            flvVideoCodec(source.buffer.readByteArray(minOf(source.buffer.size, PROBE_BYTES)))
+        }
+    }.getOrNull()
+
+    // Short timeouts: a dead candidate must not noticeably delay falling back to the listed quality.
+    private val probeClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
     }
 
     /** Returns the body on 2xx, null on other status codes; rethrows real network failures. */
@@ -99,6 +148,19 @@ class TikTokLiveResolver(
         private const val AID = "1988"
         private const val API_LIVE_BASE = "https://www.tiktok.com/api-live/user/room/"
         private const val WEBCAST_INFO_BASE = "https://webcast.tiktok.com/webcast/room/info/"
+
+        private const val PROBE_TIMEOUT_SECONDS = 5L
+        // The first video tag sits ~1 KB in (after the metadata and audio config tags).
+        private const val PROBE_BYTES = 16L * 1024
+        private const val FLV_HEADER_SIZE = 9
+        private const val FLV_PREVIOUS_TAG_SIZE = 4
+        private const val FLV_TAG_HEADER_SIZE = 11
+        private const val FLV_TAG_TYPE_MASK = 0x1F
+        private const val FLV_TAG_VIDEO = 9
+        private const val FLV_CODEC_MASK = 0x0F
+        private const val FLV_CODEC_AVC = 7
+        private const val FLV_CODEC_HEVC = 12 // de-facto id, not in the FLV spec
+        private val AUDIO_ONLY_PARAM = Regex("([?&])only_audio=1(&|$)")
 
         /** Quality keys, highest first; matched case-insensitively. */
         private val QUALITY_PRIORITY =
@@ -155,6 +217,50 @@ class TikTokLiveResolver(
         }.getOrElse { LiveStatus.Error("parse: ${it.message}") }
 
         /**
+         * The unlisted raw-source URL hiding behind the audio-only entry, or null when the source
+         * is already listed (nothing to gain) or there is no audio-only entry. Pure; unit-tested.
+         */
+        fun extractSourceCandidate(jsonText: String): String? = runCatching {
+            val data = findStreamData(JSONTokener(jsonText).nextValue())?.optJSONObject("data") ?: return null
+            val qualities = data.keys().asSequence().toList()
+            if (qualities.any(::isOriginKey)) return null
+            qualities.firstNotNullOfOrNull { quality ->
+                stripAudioOnly(data.optJSONObject(quality)?.optJSONObject("main")?.optString("flv", "").orEmpty())
+            }
+        }.getOrNull()
+
+        /** [url] minus its `only_audio=1` flag; null unless it is an audio-only FLV url. Pure. */
+        fun stripAudioOnly(url: String): String? {
+            if (!looksFlv(url) || !AUDIO_ONLY_PARAM.containsMatchIn(url)) return null
+            // Keep the separator when another parameter follows, drop it when the flag was last.
+            return AUDIO_ONLY_PARAM.replace(url) { m -> if (m.groupValues[2].isEmpty()) "" else m.groupValues[1] }
+        }
+
+        /**
+         * FLV codec id (7 = H.264, 12 = H.265) of the first video tag in [prefix], the leading
+         * bytes of a stream. Null when it is not FLV or no video tag starts within [prefix] — which
+         * is what an audio-only stream looks like. Pure; unit-tested.
+         */
+        fun flvVideoCodec(prefix: ByteArray): Int? {
+            val isFlv = prefix.size >= FLV_HEADER_SIZE &&
+                prefix[0] == 'F'.code.toByte() && prefix[1] == 'L'.code.toByte() && prefix[2] == 'V'.code.toByte()
+            if (!isFlv) return null
+            var tagStart = FLV_HEADER_SIZE + FLV_PREVIOUS_TAG_SIZE
+            while (tagStart + FLV_TAG_HEADER_SIZE < prefix.size) {
+                val bodyStart = tagStart + FLV_TAG_HEADER_SIZE
+                if (prefix[tagStart].toInt() and FLV_TAG_TYPE_MASK == FLV_TAG_VIDEO) {
+                    return prefix[bodyStart].toInt() and FLV_CODEC_MASK
+                }
+                val bodySize = (1..3).fold(0) { size, i -> (size shl 8) or (prefix[tagStart + i].toInt() and 0xFF) }
+                tagStart = bodyStart + bodySize + FLV_PREVIOUS_TAG_SIZE
+            }
+            return null
+        }
+
+        private fun isOriginKey(quality: String) =
+            quality.equals("origin", true) || quality.equals("origion", true)
+
+        /**
          * Choose the best quality out of TikTok's `stream_data` blob (the per-quality ladder,
          * often the only place "origin" exists). Returns null if no usable stream_data is found.
          */
@@ -168,7 +274,7 @@ class TikTokLiveResolver(
                 val hls = main.optString("hls", "").takeIf { it.startsWith("http") }
                 val flv = main.optString("flv", "").takeIf { it.startsWith("http") }
                 if (hls == null && flv == null) continue
-                val isOrigin = quality.equals("origin", true) || quality.equals("origion", true)
+                val isOrigin = isOriginKey(quality)
                 val (w, h, vbitrate) = parseSdkParams(main.optString("sdk_params", ""))
                 // Origin (the raw source) always wins; otherwise rank by pixels then bitrate.
                 val score = if (isOrigin) Long.MAX_VALUE else w.toLong() * h.toLong() * 1_000_000L + vbitrate

@@ -6,6 +6,10 @@
     <string name="enter_username_title">Nhập username TikTok</string>
     <string name="enter_username_hint">vd: namblueraudua (không có @)</string>
     <string name="watch">Xem</string>
+    <string name="history_title">Đã xem</string>
+    <string name="history_hint">Nhấn giữ OK để xoá khỏi lịch sử</string>
+    <string name="history_item">\@%1$s</string>
+    <string name="history_deleted">Đã xoá @%1$s khỏi lịch sử</string>
     <string name="status_connecting">Đang kết nối…</string>
     <string name="status_waiting_live">Đang chờ live…</string>
     <string name="status_reconnecting">Mất kết nối, đang thử lại…</string>

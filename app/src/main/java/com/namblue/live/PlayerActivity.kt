@@ -16,8 +16,13 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.Extractor
+import androidx.media3.extractor.ExtractorsFactory
 import com.namblue.live.databinding.ActivityPlayerBinding
+import com.namblue.live.flv.FlvExtractor
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +53,7 @@ class PlayerActivity : Activity() {
         TikTokLiveResolver(
             uniqueId = username,
             cookieProvider = { CookieManager.getInstance().getCookie(TIKTOK_HOME) },
+            canDecodeHevc = ::hasHevcDecoder,
         )
     }
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -58,8 +64,18 @@ class PlayerActivity : Activity() {
     /** Completed by the player listener when the current playback breaks, so the loop re-resolves. */
     private var interruption: CompletableDeferred<Unit>? = null
 
+    /**
+     * Cleared for this screen once a stream turns out unplayable here: the unlisted source can
+     * exceed what this TV decodes, and re-resolving it forever would never play. Listed qualities
+     * remain available.
+     */
+    private var allowSourceUpgrade = true
+
     private val playerListener = object : Player.Listener {
-        override fun onPlayerError(error: PlaybackException) = signalInterruption()
+        override fun onPlayerError(error: PlaybackException) {
+            if (error.errorCode in UNPLAYABLE_ERROR_CODES) allowSourceUpgrade = false
+            signalInterruption()
+        }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             when (playbackState) {
@@ -107,7 +123,7 @@ class PlayerActivity : Activity() {
         loopJob = uiScope.launch {
             while (isActive) {
                 showStatus(getString(R.string.status_connecting))
-                when (val status = resolver.resolve()) {
+                when (val status = resolver.resolve(allowSourceUpgrade)) {
                     is LiveStatus.Live -> {
                         val gate = CompletableDeferred<Unit>()
                         interruption = gate
@@ -194,8 +210,14 @@ class PlayerActivity : Activity() {
         val renderersFactory = DefaultRenderersFactory(this)
             .setEnableDecoderFallback(true)
 
+        // Media3's own FLV extractor reads H.264 only; ours goes first and also reads the H.265
+        // that TikTok serves for source-quality streams.
+        val extractorsFactory = ExtractorsFactory {
+            arrayOf<Extractor>(FlvExtractor()) + DefaultExtractorsFactory().createExtractors()
+        }
+
         val exo = ExoPlayer.Builder(this, renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(httpFactory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(httpFactory, extractorsFactory))
             .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -214,6 +236,10 @@ class PlayerActivity : Activity() {
         binding.playerView.player = exo
         player = exo
     }
+
+    private fun hasHevcDecoder(): Boolean = runCatching {
+        MediaCodecUtil.getDecoderInfos(MimeTypes.VIDEO_H265, /* secure = */ false, /* tunneling = */ false).isNotEmpty()
+    }.getOrDefault(false)
 
     private fun releasePlayer() {
         player?.let {
@@ -255,5 +281,16 @@ class PlayerActivity : Activity() {
         private const val RETRY_DELAY_MS = 10_000L     // when offline / network error
         private const val RECONNECT_DELAY_MS = 2_000L  // brief pause after a live drops
         private const val TIKTOK_HOME = "https://www.tiktok.com"
+
+        /** Errors that mean "this stream cannot play on this device", not "the network hiccuped". */
+        private val UNPLAYABLE_ERROR_CODES = setOf(
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+        )
     }
 }

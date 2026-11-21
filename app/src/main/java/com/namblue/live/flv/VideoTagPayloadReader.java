@@ -1,0 +1,173 @@
+/*
+ * Copyright (C) 2016 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*
+ * Modified for NamBlue Live: copied from androidx.media3:media3-extractor:1.4.1
+ * (package androidx.media3.extractor.flv) so H.265 video can be added — upstream reads H.264 only.
+ * Changes: package renamed; checkerframework nullness annotations removed; H.265 (codec id 12) support added.
+ */
+package com.namblue.live.flv;
+
+import androidx.media3.common.C;
+import androidx.media3.common.Format;
+import androidx.media3.common.MimeTypes;
+import androidx.media3.common.ParserException;
+import androidx.media3.common.util.ParsableByteArray;
+import androidx.media3.container.NalUnitUtil;
+import androidx.media3.extractor.AvcConfig;
+import androidx.media3.extractor.HevcConfig;
+import androidx.media3.extractor.TrackOutput;
+
+/** Parses video tags from an FLV stream and extracts H.264 or H.265 nal units. */
+/* package */ final class VideoTagPayloadReader extends TagPayloadReader {
+
+  // Video codecs. 12 is not in the FLV spec but is the de-facto id for H.265, and what TikTok's
+  // CDN sends for source-quality streams. It reuses the AVC packet layout: a sequence header
+  // carrying the decoder configuration record, then length-delimited NAL units.
+  private static final int VIDEO_CODEC_AVC = 7;
+  private static final int VIDEO_CODEC_HEVC = 12;
+
+  // Frame types.
+  private static final int VIDEO_FRAME_KEYFRAME = 1;
+  private static final int VIDEO_FRAME_VIDEO_INFO = 5;
+
+  // Packet types.
+  private static final int AVC_PACKET_TYPE_SEQUENCE_HEADER = 0;
+  private static final int AVC_PACKET_TYPE_AVC_NALU = 1;
+
+  // Temporary arrays.
+  private final ParsableByteArray nalStartCode;
+  private final ParsableByteArray nalLength;
+  private int nalUnitLengthFieldLength;
+
+  // State variables.
+  private boolean hasOutputFormat;
+  private boolean hasOutputKeyframe;
+  private int frameType;
+  private int videoCodec;
+
+  /**
+   * @param output A {@link TrackOutput} to which samples should be written.
+   */
+  public VideoTagPayloadReader(TrackOutput output) {
+    super(output);
+    nalStartCode = new ParsableByteArray(NalUnitUtil.NAL_START_CODE);
+    nalLength = new ParsableByteArray(4);
+  }
+
+  @Override
+  public void seek() {
+    hasOutputKeyframe = false;
+  }
+
+  @Override
+  protected boolean parseHeader(ParsableByteArray data) throws UnsupportedFormatException {
+    int header = data.readUnsignedByte();
+    int frameType = (header >> 4) & 0x0F;
+    int videoCodec = (header & 0x0F);
+    // Support just H.264 and H.265 encoded content.
+    if (videoCodec != VIDEO_CODEC_AVC && videoCodec != VIDEO_CODEC_HEVC) {
+      throw new UnsupportedFormatException("Video format not supported: " + videoCodec);
+    }
+    this.videoCodec = videoCodec;
+    this.frameType = frameType;
+    return (frameType != VIDEO_FRAME_VIDEO_INFO);
+  }
+
+  @Override
+  protected boolean parsePayload(ParsableByteArray data, long timeUs) throws ParserException {
+    int packetType = data.readUnsignedByte();
+    int compositionTimeMs = data.readInt24();
+
+    timeUs += compositionTimeMs * 1000L;
+    // Parse the sequence header in case this was not done before.
+    if (packetType == AVC_PACKET_TYPE_SEQUENCE_HEADER && !hasOutputFormat) {
+      ParsableByteArray videoSequence = new ParsableByteArray(new byte[data.bytesLeft()]);
+      data.readBytes(videoSequence.getData(), 0, data.bytesLeft());
+      // Construct and output the format.
+      output.format(
+          videoCodec == VIDEO_CODEC_HEVC
+              ? parseHevcFormat(videoSequence)
+              : parseAvcFormat(videoSequence));
+      hasOutputFormat = true;
+      return false;
+    } else if (packetType == AVC_PACKET_TYPE_AVC_NALU && hasOutputFormat) {
+      boolean isKeyframe = frameType == VIDEO_FRAME_KEYFRAME;
+      if (!hasOutputKeyframe && !isKeyframe) {
+        return false;
+      }
+      // TODO: Deduplicate with Mp4Extractor.
+      // Zero the top three bytes of the array that we'll use to decode nal unit lengths, in case
+      // they're only 1 or 2 bytes long.
+      byte[] nalLengthData = nalLength.getData();
+      nalLengthData[0] = 0;
+      nalLengthData[1] = 0;
+      nalLengthData[2] = 0;
+      int nalUnitLengthFieldLengthDiff = 4 - nalUnitLengthFieldLength;
+      // NAL units are length delimited, but the decoder requires start code delimited units.
+      // Loop until we've written the sample to the track output, replacing length delimiters with
+      // start codes as we encounter them.
+      int bytesWritten = 0;
+      int bytesToWrite;
+      while (data.bytesLeft() > 0) {
+        // Read the NAL length so that we know where we find the next one.
+        data.readBytes(nalLength.getData(), nalUnitLengthFieldLengthDiff, nalUnitLengthFieldLength);
+        nalLength.setPosition(0);
+        bytesToWrite = nalLength.readUnsignedIntToInt();
+
+        // Write a start code for the current NAL unit.
+        nalStartCode.setPosition(0);
+        output.sampleData(nalStartCode, 4);
+        bytesWritten += 4;
+
+        // Write the payload of the NAL unit.
+        output.sampleData(data, bytesToWrite);
+        bytesWritten += bytesToWrite;
+      }
+      output.sampleMetadata(
+          timeUs, isKeyframe ? C.BUFFER_FLAG_KEY_FRAME : 0, bytesWritten, 0, null);
+      hasOutputKeyframe = true;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  private Format parseAvcFormat(ParsableByteArray videoSequence) throws ParserException {
+    AvcConfig avcConfig = AvcConfig.parse(videoSequence);
+    nalUnitLengthFieldLength = avcConfig.nalUnitLengthFieldLength;
+    return new Format.Builder()
+        .setSampleMimeType(MimeTypes.VIDEO_H264)
+        .setCodecs(avcConfig.codecs)
+        .setWidth(avcConfig.width)
+        .setHeight(avcConfig.height)
+        .setPixelWidthHeightRatio(avcConfig.pixelWidthHeightRatio)
+        .setInitializationData(avcConfig.initializationData)
+        .build();
+  }
+
+  private Format parseHevcFormat(ParsableByteArray videoSequence) throws ParserException {
+    HevcConfig hevcConfig = HevcConfig.parse(videoSequence);
+    nalUnitLengthFieldLength = hevcConfig.nalUnitLengthFieldLength;
+    return new Format.Builder()
+        .setSampleMimeType(MimeTypes.VIDEO_H265)
+        .setCodecs(hevcConfig.codecs)
+        .setWidth(hevcConfig.width)
+        .setHeight(hevcConfig.height)
+        .setPixelWidthHeightRatio(hevcConfig.pixelWidthHeightRatio)
+        .setInitializationData(hevcConfig.initializationData)
+        .build();
+  }
+}
