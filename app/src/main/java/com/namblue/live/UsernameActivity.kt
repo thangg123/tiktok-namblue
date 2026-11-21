@@ -3,20 +3,16 @@ package com.namblue.live
 import android.app.Activity
 import android.app.Dialog
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
-import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.namblue.live.databinding.ActivityUsernameBinding
-import com.namblue.live.databinding.DialogConfirmDeleteBinding
 
 /**
  * "Other" screen: type any TikTok username to watch that account's live instead of NamBlue.
@@ -88,25 +84,11 @@ class UsernameActivity : Activity() {
 
     /** Ask before removing [username]; only the explicit "Xoá" button deletes. */
     private fun confirmDelete(username: String, index: Int) {
-        val dialogBinding = DialogConfirmDeleteBinding.inflate(layoutInflater)
-        val dialog = Dialog(this).apply {
-            requestWindowFeature(Window.FEATURE_NO_TITLE)
-            setContentView(dialogBinding.root)
-            // The layout draws its own rounded panel; drop the stock dialog frame around it.
-            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            window?.setLayout(dp(CONFIRM_DIALOG_WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
-            setOnDismissListener { confirmDialog = null }
-        }
-        dialogBinding.confirmMessage.text = getString(R.string.history_confirm_delete, username)
-        dialogBinding.btnCancel.setOnClickListener { dialog.dismiss() }
-        dialogBinding.btnDelete.setOnClickListener {
-            dialog.dismiss()
-            deleteFromHistory(username, index)
-        }
-        confirmDialog = dialog
-        dialog.show()
-        // Start on "Huỷ": pressing OK again by reflex must not delete anything.
-        dialogBinding.btnCancel.requestFocus()
+        confirmDialog = TvDialogs.confirm(
+            activity = this,
+            message = getString(R.string.history_confirm_delete, username),
+            confirmLabel = getString(R.string.delete),
+        ) { deleteFromHistory(username, index) }.apply { setOnDismissListener { confirmDialog = null } }
     }
 
     private fun deleteFromHistory(username: String, index: Int) {
@@ -154,7 +136,6 @@ class UsernameActivity : Activity() {
         private const val HISTORY_HEIGHT_DP = 64
         private const val HISTORY_PAD_H_DP = 28
         private const val HISTORY_GAP_DP = 16
-        private const val CONFIRM_DIALOG_WIDTH_DP = 520
 
         /** Reduce any of `name`, `@name`, `name/live`, `https://tiktok.com/@name/live` to `name`. */
         fun normalizeUsername(raw: String): String {

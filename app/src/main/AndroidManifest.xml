@@ -51,6 +51,13 @@
             android:windowSoftInputMode="stateVisible|adjustResize" />
 
         <activity
+            android:name=".LiveListActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|navigation"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="landscape" />
+
+        <activity
             android:name=".WebPlayerActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|navigation"
             android:exported="false"

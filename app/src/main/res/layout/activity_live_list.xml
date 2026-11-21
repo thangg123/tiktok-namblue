@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Browse screen, YouTube-on-TV style: the channel under the cursor plays in the top pane,
+     section chips sit in the middle, and the channel grid fills the rest. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:keepScreenOn="true">
+
+    <!-- Off-screen reader for tiktok.com/live (see LivePageReader). INVISIBLE, not GONE, so the
+         page still lays out at full size and renders its cards. -->
+    <WebView
+        android:id="@+id/scrapeView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:focusable="false"
+        android:visibility="invisible" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:orientation="vertical"
+        android:paddingHorizontal="40dp"
+        android:paddingTop="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="224dp"
+            android:orientation="horizontal">
+
+            <FrameLayout
+                android:id="@+id/previewFrame"
+                android:layout_width="398dp"
+                android:layout_height="224dp"
+                android:background="@drawable/preview_frame">
+
+                <androidx.media3.ui.PlayerView
+                    android:id="@+id/previewView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:focusable="false"
+                    app:resize_mode="fit"
+                    app:shutter_background_color="#0E1822"
+                    app:surface_type="texture_view"
+                    app:use_controller="false" />
+
+                <TextView
+                    android:id="@+id/previewStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:padding="16dp"
+                    android:textColor="#9FB3C8"
+                    android:textSize="18sp" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="32dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/heroBadge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/live_badge"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="2dp"
+                    android:text="@string/live_badge"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:visibility="invisible" />
+
+                <TextView
+                    android:id="@+id/heroNickname"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@android:color/white"
+                    android:textSize="34sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/heroUsername"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="#9FB3C8"
+                    android:textSize="20sp" />
+
+                <TextView
+                    android:id="@+id/heroDetail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textColor="#DCE6F0"
+                    android:textSize="20sp" />
+
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/heroHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/live_list_hint"
+                    android:textColor="#6F849A"
+                    android:textSize="16sp"
+                    android:visibility="invisible" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <HorizontalScrollView
+            android:id="@+id/chipScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:clipToPadding="false"
+            android:paddingVertical="4dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/chipRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="#6F849A"
+            android:textSize="16sp" />
+
+        <ScrollView
+            android:id="@+id/gridScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingBottom="24dp"
+            android:scrollbars="none">
+
+            <GridLayout
+                android:id="@+id/grid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:columnCount="6"
+                android:useDefaultMargins="false" />
+        </ScrollView>
+    </LinearLayout>
+</FrameLayout>

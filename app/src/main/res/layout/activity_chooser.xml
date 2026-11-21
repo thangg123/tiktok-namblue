@@ -12,7 +12,7 @@
 
         <Button
             android:id="@+id/btnNamblue"
-            android:layout_width="300dp"
+            android:layout_width="260dp"
             android:layout_height="140dp"
             android:background="@drawable/btn_chooser_bg"
             android:focusable="true"
@@ -25,17 +25,35 @@
             android:textStyle="bold" />
 
         <Space
-            android:layout_width="48dp"
+            android:layout_width="32dp"
             android:layout_height="match_parent" />
 
         <Button
             android:id="@+id/btnOther"
-            android:layout_width="300dp"
+            android:layout_width="260dp"
             android:layout_height="140dp"
             android:background="@drawable/btn_chooser_bg"
             android:focusable="true"
             android:nextFocusLeft="@+id/btnNamblue"
+            android:nextFocusRight="@+id/btnBrowse"
             android:text="@string/source_other"
+            android:textAllCaps="false"
+            android:textColor="@color/btn_chooser_text"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <Space
+            android:layout_width="32dp"
+            android:layout_height="match_parent" />
+
+        <Button
+            android:id="@+id/btnBrowse"
+            android:layout_width="260dp"
+            android:layout_height="140dp"
+            android:background="@drawable/btn_chooser_bg"
+            android:focusable="true"
+            android:nextFocusLeft="@+id/btnOther"
+            android:text="@string/source_browse"
             android:textAllCaps="false"
             android:textColor="@color/btn_chooser_text"
             android:textSize="30sp"

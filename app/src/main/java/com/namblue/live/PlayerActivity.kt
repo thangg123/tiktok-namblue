@@ -5,24 +5,11 @@ import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.extractor.DefaultExtractorsFactory
-import androidx.media3.extractor.Extractor
-import androidx.media3.extractor.ExtractorsFactory
 import com.namblue.live.databinding.ActivityPlayerBinding
-import com.namblue.live.flv.FlvExtractor
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +40,7 @@ class PlayerActivity : Activity() {
         TikTokLiveResolver(
             uniqueId = username,
             cookieProvider = { CookieManager.getInstance().getCookie(TIKTOK_HOME) },
-            canDecodeHevc = ::hasHevcDecoder,
+            canDecodeHevc = LivePlayers::hasHevcDecoder,
         )
     }
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -166,12 +153,7 @@ class PlayerActivity : Activity() {
 
     private fun play(live: LiveStatus.Live) {
         val exo = player ?: return
-        val builder = MediaItem.Builder().setUri(live.url)
-        when (live.type) {
-            StreamType.HLS -> builder.setMimeType(MimeTypes.APPLICATION_M3U8)
-            StreamType.PROGRESSIVE -> { /* let ExoPlayer sniff (FLV/MP4) */ }
-        }
-        exo.setMediaItem(builder.build())
+        exo.setMediaItem(LivePlayers.mediaItem(live))
         exo.prepare()
         exo.playWhenReady = true
     }
@@ -187,59 +169,14 @@ class PlayerActivity : Activity() {
 
     private fun createPlayer() {
         if (player != null) return
-        // CDN pull hosts reject empty/unknown User-Agents, so use the same browser UA as the resolver.
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(TikTokLiveResolver.USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(10_000)
-            .setReadTimeoutMs(20_000)
-
-        // Keep the highest quality (origin) but play it as smoothly as possible on weak TV
-        // hardware: a generous time-based buffer absorbs the high bitrate + network jitter, and
-        // decoder fallback avoids a hard stall if the hardware decoder chokes on the source profile.
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                /* minBufferMs = */ 30_000,
-                /* maxBufferMs = */ 60_000,
-                /* bufferForPlaybackMs = */ 3_000,
-                /* bufferForPlaybackAfterRebufferMs = */ 6_000,
-            )
-            .setPrioritizeTimeOverSizeThresholds(true) // buffer by time, not bytes — vital at high bitrate
-            .build()
-
-        val renderersFactory = DefaultRenderersFactory(this)
-            .setEnableDecoderFallback(true)
-
-        // Media3's own FLV extractor reads H.264 only; ours goes first and also reads the H.265
-        // that TikTok serves for source-quality streams.
-        val extractorsFactory = ExtractorsFactory {
-            arrayOf<Extractor>(FlvExtractor()) + DefaultExtractorsFactory().createExtractors()
+        val exo = LivePlayers.build(this, LivePlayers.watchingLoadControl()).apply {
+            repeatMode = Player.REPEAT_MODE_OFF
+            playWhenReady = true
+            addListener(playerListener)
         }
-
-        val exo = ExoPlayer.Builder(this, renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(httpFactory, extractorsFactory))
-            .setLoadControl(loadControl)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                    .setUsage(C.USAGE_MEDIA)
-                    .build(),
-                /* handleAudioFocus = */ true,
-            )
-            .build()
-            .apply {
-                repeatMode = Player.REPEAT_MODE_OFF
-                playWhenReady = true
-                addListener(playerListener)
-            }
-
         binding.playerView.player = exo
         player = exo
     }
-
-    private fun hasHevcDecoder(): Boolean = runCatching {
-        MediaCodecUtil.getDecoderInfos(MimeTypes.VIDEO_H265, /* secure = */ false, /* tunneling = */ false).isNotEmpty()
-    }.getOrDefault(false)
 
     private fun releasePlayer() {
         player?.let {

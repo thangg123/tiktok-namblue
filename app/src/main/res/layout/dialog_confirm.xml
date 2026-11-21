@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- "Remove from history?" popup. Cancel sits first and takes focus, so a stray OK changes nothing. -->
+<!-- Yes/no popup. Cancel sits first and takes focus, so a stray OK changes nothing. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -29,7 +29,7 @@
             android:layout_weight="1"
             android:background="@drawable/btn_chooser_bg"
             android:focusable="true"
-            android:nextFocusRight="@+id/btnDelete"
+            android:nextFocusRight="@+id/btnConfirm"
             android:text="@string/cancel"
             android:textAllCaps="false"
             android:textColor="@color/btn_chooser_text"
@@ -41,14 +41,13 @@
             android:layout_height="match_parent" />
 
         <Button
-            android:id="@+id/btnDelete"
+            android:id="@+id/btnConfirm"
             android:layout_width="0dp"
             android:layout_height="72dp"
             android:layout_weight="1"
             android:background="@drawable/btn_chooser_bg"
             android:focusable="true"
             android:nextFocusLeft="@+id/btnCancel"
-            android:text="@string/delete"
             android:textAllCaps="false"
             android:textColor="@color/btn_chooser_text"
             android:textSize="22sp"

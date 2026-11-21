@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keyword search for live rooms. The field takes focus; Go on the keyboard or "Tìm" searches. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/dialog_bg"
+    android:orientation="vertical"
+    android:padding="32dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/search_title"
+        android:textColor="@android:color/white"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/searchInput"
+        android:layout_width="match_parent"
+        android:layout_height="68dp"
+        android:layout_marginTop="20dp"
+        android:background="@drawable/input_bg"
+        android:hint="@string/search_hint"
+        android:imeOptions="actionSearch"
+        android:importantForAutofill="no"
+        android:inputType="text"
+        android:paddingHorizontal="20dp"
+        android:singleLine="true"
+        android:textColor="@android:color/white"
+        android:textColorHint="#9FB3C8"
+        android:textSize="22sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnCancel"
+            android:layout_width="0dp"
+            android:layout_height="68dp"
+            android:layout_weight="1"
+            android:background="@drawable/btn_chooser_bg"
+            android:text="@string/cancel"
+            android:textAllCaps="false"
+            android:textColor="@color/btn_chooser_text"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <Space
+            android:layout_width="20dp"
+            android:layout_height="match_parent" />
+
+        <Button
+            android:id="@+id/btnSearch"
+            android:layout_width="0dp"
+            android:layout_height="68dp"
+            android:layout_weight="1"
+            android:background="@drawable/btn_chooser_bg"
+            android:text="@string/search_go"
+            android:textAllCaps="false"
+            android:textColor="@color/btn_chooser_text"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</LinearLayout>
