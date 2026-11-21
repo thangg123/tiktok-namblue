@@ -31,6 +31,8 @@ data class ProfileHeader(
     val avatarUrl: String?,
     val needsLogin: Boolean,
     val needsVerification: Boolean,
+    /** Exact follower count when known (the embed gives it), for ranking search results. */
+    val followerCount: Long? = null,
 )
 
 /** One account in user search results. */
@@ -66,9 +68,12 @@ object ProfileDirectory {
               }
             });
             var img = a.querySelector('img');
+            // Lazy tiles may keep the real address in srcset or data-src until scrolled into view.
+            var src = img ? (img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') ||
+              ((img.getAttribute('srcset') || '').split(' ')[0])) : '';
             var left = a.getBoundingClientRect().left / Math.max(window.innerWidth, 1);
             links.push({ h: a.getAttribute('href') || '', t: texts,
-                         a: img ? img.src : '', alt: img ? (img.alt || '') : '', x: left });
+                         a: src || '', alt: img ? (img.alt || '') : '', x: left });
           });
           var avatar = document.querySelector('[data-e2e="user-avatar"] img');
           var title = text('user-title');

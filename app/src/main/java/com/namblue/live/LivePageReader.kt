@@ -6,6 +6,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import java.io.ByteArrayInputStream
@@ -41,6 +43,16 @@ class LivePageReader(private val webView: WebView) {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                 if (isVideoStream(request.url.toString())) emptyResponse() else null
         }
+    }
+
+    /**
+     * Run [script] at the start of every tiktok.com page, before the page's own scripts.
+     * Returns false on WebViews too old to support it.
+     */
+    fun addStartScript(script: String): Boolean {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return false
+        WebViewCompat.addDocumentStartJavaScript(webView, script, setOf(TIKTOK_ORIGIN))
+        return true
     }
 
     /** Load [url] and suspend until it has finished loading (its cards render afterwards). */

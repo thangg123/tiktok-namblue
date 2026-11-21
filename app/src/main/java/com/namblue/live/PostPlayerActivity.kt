@@ -188,9 +188,10 @@ class PostPlayerActivity : Activity() {
               }
               window.addEventListener('message', function (e) {
                 var d = e.data;
-                if (d && d['x-tiktok-player'] && d.type === 'onStateChange' && typeof d.value === 'number') {
-                  $BRIDGE_NAME.onState(d.value);
-                }
+                if (!d || !d['x-tiktok-player']) return;
+                // Embedded players start muted to be allowed to autoplay; a TV should have sound.
+                if (d.type === 'onPlayerReady') { command('unMute'); command('play'); }
+                if (d.type === 'onStateChange' && typeof d.value === 'number') $BRIDGE_NAME.onState(d.value);
               });
             </script></body></html>
         """.trimIndent()

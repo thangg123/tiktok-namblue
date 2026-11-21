@@ -7,6 +7,7 @@ import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.GridLayout
 import android.widget.LinearLayout
@@ -17,6 +18,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -25,9 +29,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * "Trang cá nhân": find a TikTok account and open its profile.
  *
- * A typed username opens straight away (no login needed); free text is searched on TikTok's
- * user search, which only answers logged-in visitors. Opened profiles are kept under
- * "Đã xem gần đây"; holding OK on one asks to remove it.
+ * Type a name or username: matching accounts appear as cards with photo and followers, found
+ * without a login through TikTok's search suggestions ([ProfileSuggest]), plus TikTok's own user
+ * search when logged in. Opened profiles are kept under "Đã xem gần đây"; holding OK on one asks
+ * to remove it.
  */
 class ProfileSearchActivity : Activity() {
 
@@ -36,6 +41,9 @@ class ProfileSearchActivity : Activity() {
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val avatars by lazy { AvatarLoader(targetPx = dp(AVATAR_DP)) }
     private var searchJob: Job? = null
+
+    /** Lower-cased usernames already shown for the current search, so none appears twice. */
+    private var shown: Set<String> = emptySet()
     private var dialog: Dialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,50 +84,68 @@ class ProfileSearchActivity : Activity() {
 
     // --- Find -------------------------------------------------------------------------------
 
+    /**
+     * Shows accounts matching the typed text: the exact username (if it is one), then accounts
+     * guessed from TikTok's search suggestions and confirmed through the creator embed, then —
+     * when logged in — TikTok's own user search. Cards appear as each one is confirmed.
+     */
     private fun find() {
         val query = binding.queryInput.text?.toString()?.trim().orEmpty()
         if (query.isEmpty()) {
             Toast.makeText(this, R.string.profile_search_hint, Toast.LENGTH_SHORT).show()
             return
         }
-        val handle = UsernameActivity.normalizeUsername(query).takeIf(ProfileDirectory::isUsername)
-        binding.resultGrid.removeAllViews()
-        handle?.let { addCard(ItemLiveChannelBinding.inflate(layoutInflater, binding.resultGrid, false), directHit(it)) }
-
-        if (!reader.isLoggedIn()) {
-            binding.statusText.text = ""
-            if (handle != null) {
-                binding.resultGrid.getChildAt(0)?.requestFocus()
-            } else {
-                promptLogin()
-            }
-            return
-        }
-        search(query, keepFirst = handle != null)
-    }
-
-    private fun directHit(username: String) =
-        ProfileHit(username, getString(R.string.profile_open_direct), avatarUrl = null, followers = null)
-
-    private fun search(query: String, keepFirst: Boolean) {
-        val url = ProfileDirectory.userSearchUrl(query) ?: return
+        hideKeyboard()
         searchJob?.cancel()
+        binding.resultGrid.removeAllViews()
+        shown = emptySet()
         binding.statusText.setText(R.string.profile_searching)
+        val typed = UsernameActivity.normalizeUsername(query).takeIf(ProfileDirectory::isUsername)
         searchJob = uiScope.launch {
-            val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { searchResults(url) }.orEmpty()
-            val shown = if (keepFirst) hits.filterNot { it.username.equals(directUsername(), ignoreCase = true) } else hits
-            shown.forEach { addCard(ItemLiveChannelBinding.inflate(layoutInflater, binding.resultGrid, false), it) }
-            binding.statusText.text = if (shown.isEmpty() && !keepFirst) {
+            typed?.let { showDirectHit(it) }
+            showSuggested(query)
+            if (reader.isLoggedIn()) showTikTokSearch(query)
+            binding.statusText.text = if (shown.isEmpty()) {
                 getString(R.string.profile_no_results)
             } else {
-                getString(R.string.profile_results, binding.resultGrid.childCount)
+                getString(R.string.profile_results, shown.size)
             }
-            binding.resultGrid.getChildAt(0)?.requestFocus()
         }
     }
 
-    private fun directUsername(): String? =
-        UsernameActivity.normalizeUsername(binding.queryInput.text?.toString().orEmpty())
+    /**
+     * The exact-username card, kept even when TikTok won't embed the account (audience controls)
+     * since the full page may still open. Photo, name and followers come from the embed — cached,
+     * so opening the profile next costs nothing.
+     */
+    private suspend fun showDirectHit(username: String) {
+        val item = addHit(ProfileHit(username, getString(R.string.profile_open_direct), avatarUrl = null, followers = null))
+        val header = (ProfileEmbed.load(username) as? ProfileEmbed.Result.Ok)?.header ?: return
+        bindHit(item, ProfileHit(username, header.nickname ?: username, header.avatarUrl, header.followers))
+    }
+
+    /**
+     * Accounts guessed from TikTok's suggestions, checked two at a time, then shown most
+     * followed first — a guessed handle is often a small namesake of the account people mean.
+     */
+    private suspend fun showSuggested(query: String) {
+        val candidates = ProfileSuggest.candidates(query, ProfileSuggest.load(query))
+            .filterNot { it.lowercase() in shown }
+        val found = candidates.chunked(PARALLEL_CHECKS).flatMap { batch ->
+            coroutineScope { batch.map { name -> async { name to ProfileEmbed.load(name) } }.awaitAll() }
+                .mapNotNull { (name, result) -> (result as? ProfileEmbed.Result.Ok)?.header?.let { name to it } }
+        }
+        found.sortedByDescending { (_, header) -> header.followerCount ?: 0L }
+            .filterNot { (name, _) -> name.lowercase() in shown }
+            .forEach { (name, header) -> addHit(ProfileHit(name, header.nickname ?: name, header.avatarUrl, header.followers)) }
+    }
+
+    /** TikTok's real user search; only answers logged-in visitors. */
+    private suspend fun showTikTokSearch(query: String) {
+        val url = ProfileDirectory.userSearchUrl(query) ?: return
+        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { searchResults(url) }.orEmpty()
+        hits.filterNot { it.username.lowercase() in shown }.forEach { addHit(it) }
+    }
 
     /** Poll the search page until its result list stops growing. */
     private suspend fun searchResults(url: String): List<ProfileHit> {
@@ -133,14 +159,37 @@ class ProfileSearchActivity : Activity() {
         }
     }
 
-    private fun promptLogin() {
-        dialog = TvDialogs.confirm(this, getString(R.string.profile_search_needs_login), getString(R.string.login)) {
-            startActivity(WebPlayerActivity.intent(this, WebPlayerActivity.LOGIN_URL))
-        }
+    /** The on-screen keyboard covers the results, so put it away once a search starts. */
+    private fun hideKeyboard() {
+        getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(binding.queryInput.windowToken, 0)
+        binding.btnFind.requestFocus()
     }
 
-    private fun addCard(item: ItemLiveChannelBinding, hit: ProfileHit) {
+    /** Add a result card; the first one takes the cursor away from the search box. */
+    private fun addHit(hit: ProfileHit): ItemLiveChannelBinding {
+        shown = shown + hit.username.lowercase()
+        val item = addCard(hit)
+        if (shown.size == 1 && (currentFocus == binding.queryInput || currentFocus == binding.btnFind)) {
+            item.root.requestFocus()
+        }
+        return item
+    }
+
+    private fun addCard(hit: ProfileHit): ItemLiveChannelBinding {
+        val item = ItemLiveChannelBinding.inflate(layoutInflater, binding.resultGrid, false)
         item.avatar.clipToOutline = true
+        bindHit(item, hit)
+        item.root.layoutParams = GridLayout.LayoutParams().apply {
+            width = cardWidth
+            val gap = dp(CARD_GAP_DP)
+            setMargins(gap, gap, gap, gap)
+        }
+        item.root.setOnClickListener { open(hit.username) }
+        binding.resultGrid.addView(item.root)
+        return item
+    }
+
+    private fun bindHit(item: ItemLiveChannelBinding, hit: ProfileHit) {
         item.nickname.text = hit.nickname
         item.detail.text = listOfNotNull(
             getString(R.string.history_item, hit.username),
@@ -155,13 +204,6 @@ class ProfileSearchActivity : Activity() {
                 }
             }
         }
-        item.root.layoutParams = GridLayout.LayoutParams().apply {
-            width = cardWidth
-            val gap = dp(CARD_GAP_DP)
-            setMargins(gap, gap, gap, gap)
-        }
-        item.root.setOnClickListener { open(hit.username) }
-        binding.resultGrid.addView(item.root)
     }
 
     private fun open(username: String) {
@@ -217,6 +259,7 @@ class ProfileSearchActivity : Activity() {
 
     private companion object {
         const val SEARCH_TIMEOUT_MS = 20_000L
+        const val PARALLEL_CHECKS = 2
         const val POLL_INTERVAL_MS = 1_200L
         const val AVATAR_DP = 60
         const val CARD_GAP_DP = 6

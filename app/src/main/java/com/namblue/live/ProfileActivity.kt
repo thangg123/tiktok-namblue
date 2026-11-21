@@ -1,10 +1,13 @@
 package com.namblue.live
 
 import android.app.Activity
+import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.View
+import android.widget.Button
 import android.widget.GridLayout
 import com.namblue.live.databinding.ActivityProfileBinding
 import com.namblue.live.databinding.ItemProfilePostBinding
@@ -19,8 +22,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * One creator's profile: header plus their videos and photo posts as a D-pad grid.
- * OK on a post opens [PostPlayerActivity] at that post; reaching the last row loads more.
- * Profiles TikTok hides from logged-out viewers show a login button instead.
+ * OK on a post opens [PostPlayerActivity] at that post.
+ *
+ * Opens instantly from TikTok's creator embed ([ProfileEmbed], latest posts, no bot check).
+ * Older posts come from the full page ([ProfileDirectory]): loaded automatically when logged in
+ * to TikTok, otherwise offered through a "Xem bài cũ hơn" tile that asks for a login first.
  */
 class ProfileActivity : Activity() {
 
@@ -31,12 +37,19 @@ class ProfileActivity : Activity() {
     private val username: String by lazy { intent.getStringExtra(EXTRA_USERNAME).orEmpty() }
 
     private var posts: List<ProfilePost> = emptyList()
+    /** True once the full page (WebView) is in use, which is what can load older posts. */
+    private var webMode = false
+    private var olderCard: View? = null
     private var hasMore = true
     private var loading = false
     private var loadJob: Job? = null
     private var moreJob: Job? = null
     /** Set while the user is away logging in or solving TikTok's check; reload on return. */
     private var awayToUnlock = false
+
+    /** Set while the user is away on the login page opened by "Xem bài cũ hơn". */
+    private var awayToLogin = false
+    private var dialog: Dialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,10 +72,14 @@ class ProfileActivity : Activity() {
     override fun onStart() {
         super.onStart()
         if (::reader.isInitialized) reader.resume()
-        // Back from logging in or solving the check: the posts may now be visible.
+        // Back from logging in or solving the check: the full page may now show its posts.
         if (awayToUnlock) {
             awayToUnlock = false
-            load()
+            loadFromWeb()
+        }
+        if (awayToLogin) {
+            awayToLogin = false
+            if (reader.isLoggedIn()) loadFromWeb() else binding.statusText.setText(R.string.profile_older_not_logged_in)
         }
     }
 
@@ -72,39 +89,96 @@ class ProfileActivity : Activity() {
     }
 
     override fun onDestroy() {
+        dialog?.dismiss()
         uiScope.cancel()
         if (::reader.isInitialized) reader.destroy()
         super.onDestroy()
     }
 
     // --- Loading ----------------------------------------------------------------------------
+    //
+    // First choice is TikTok's creator embed: one plain request, no bot check, latest ~10 posts.
+    // Older posts (and creators who block embedding) need the full page in the hidden WebView,
+    // which TikTok may guard with a login wall or a captcha — so that only runs on request.
 
     private fun load() {
         loadJob?.cancel()
         moreJob?.cancel()
         posts = emptyList()
+        webMode = false
         hasMore = true
-        loading = true
         binding.grid.removeAllViews()
-        binding.btnLogin.visibility = View.GONE
+        hideAction()
         binding.statusText.setText(R.string.profile_loading)
         loadJob = uiScope.launch {
-            val raw = withTimeoutOrNull(LOAD_TIMEOUT_MS) { firstScreen() }
-            loading = false
-            val header = ProfileDirectory.parseHeader(raw)
-            header?.let(::showHeader)
-            val found = ProfileDirectory.parsePosts(raw)
-            when {
-                found.isNotEmpty() -> showPosts(found)
-                header?.needsVerification == true -> showVerificationNeeded()
-                header?.needsLogin == true -> showLoginNeeded()
-                raw == null -> binding.statusText.setText(R.string.profile_failed)
-                else -> binding.statusText.setText(R.string.profile_no_posts)
+            when (val result = ProfileEmbed.load(username)) {
+                is ProfileEmbed.Result.Ok -> {
+                    showHeader(result.header)
+                    showPosts(result.posts)
+                    if (reader.isLoggedIn()) {
+                        // Logged in: bring in the older posts straight away, no button needed.
+                        loadFromWeb(quietly = true)
+                    } else {
+                        binding.grid.addView(olderPostsCard())
+                        if (result.posts.isEmpty()) binding.grid.getChildAt(0)?.requestFocus()
+                    }
+                }
+                ProfileEmbed.Result.Unavailable -> {
+                    binding.statusText.setText(R.string.profile_embed_unavailable)
+                    showAction(getString(R.string.profile_open_full)) { requestFullPage() }
+                }
+                ProfileEmbed.Result.Unreadable -> {
+                    binding.statusText.setText(R.string.profile_failed)
+                    showAction(getString(R.string.profile_open_full)) { requestFullPage() }
+                }
             }
         }
     }
 
-    /** Poll until the grid settles (enough posts, or no growth between polls) or a login wall shows. */
+    /**
+     * The full page is what TikTok guards with a captcha, far less so for logged-in visitors —
+     * so ask for a (one-time, QR) login first, and load right after it.
+     */
+    private fun requestFullPage() {
+        if (reader.isLoggedIn()) {
+            loadFromWeb()
+            return
+        }
+        dialog = TvDialogs.confirm(this, getString(R.string.profile_older_login_prompt), getString(R.string.login)) {
+            awayToLogin = true
+            startActivity(WebPlayerActivity.intent(this, WebPlayerActivity.LOGIN_URL))
+        }
+    }
+
+    /**
+     * Switch to the full profile page for older posts; it may ask for login or a captcha.
+     * [quietly] = started automatically behind the latest posts, so a captcha prompt must not
+     * pull the cursor away from the grid the user is browsing.
+     */
+    private fun loadFromWeb(quietly: Boolean = false) {
+        loadJob?.cancel()
+        webMode = true
+        loading = true
+        hideAction()
+        removeOlderPostsCard()
+        binding.statusText.setText(R.string.profile_loading_full)
+        loadJob = uiScope.launch {
+            val raw = withTimeoutOrNull(LOAD_TIMEOUT_MS) { firstScreen() }
+            loading = false
+            val header = ProfileDirectory.parseHeader(raw)
+            if (posts.isEmpty()) header?.let(::showHeader)
+            val fresh = newPosts(ProfileDirectory.parsePosts(raw))
+            when {
+                fresh.isNotEmpty() -> appendPosts(fresh)
+                header?.needsVerification == true -> showVerificationNeeded(takeFocus = !quietly)
+                header?.needsLogin == true -> showLoginNeeded()
+                raw == null -> binding.statusText.setText(R.string.profile_failed)
+                else -> loadMore() // the full page starts with the posts we already show
+            }
+        }
+    }
+
+    /** Poll until the grid settles (enough posts, or no growth between polls) or a wall shows. */
     private suspend fun firstScreen(): String? {
         reader.open(ProfileDirectory.profileUrl(username))
         var previous = -1
@@ -119,20 +193,33 @@ class ProfileActivity : Activity() {
         }
     }
 
+    /** Full-page mode only: scroll the page so TikTok appends older posts. */
     private fun loadMore() {
-        if (!hasMore || loading || moreJob?.isActive == true) return
+        if (!webMode || !hasMore || loading || moreJob?.isActive == true) return
         moreJob = uiScope.launch {
             reader.scrollForMore()
-            val known = posts.map { it.id }.toSet()
-            val fresh = ProfileDirectory.parsePosts(reader.read(ProfileDirectory.SCRAPE_JS)).filterNot { it.id in known }
+            val fresh = newPosts(ProfileDirectory.parsePosts(reader.read(ProfileDirectory.SCRAPE_JS)))
             if (fresh.isEmpty()) {
                 hasMore = false
+                binding.statusText.text = getString(R.string.profile_no_more, posts.size)
                 return@launch
             }
-            fresh.forEachIndexed { offset, post -> binding.grid.addView(card(post, posts.size + offset)) }
-            posts = posts + fresh
-            updateCount()
+            appendPosts(fresh)
         }
+    }
+
+    private fun newPosts(found: List<ProfilePost>): List<ProfilePost> {
+        val known = posts.map { it.id }.toSet()
+        return found.filterNot { it.id in known }
+    }
+
+    private fun appendPosts(fresh: List<ProfilePost>) {
+        val firstNew = posts.size
+        fresh.forEachIndexed { offset, post -> binding.grid.addView(card(post, firstNew + offset)) }
+        posts = posts + fresh
+        updateCount()
+        val focus = currentFocus
+        if (focus == null || !focus.isShown) binding.grid.getChildAt(firstNew)?.requestFocus()
     }
 
     // --- Rendering --------------------------------------------------------------------------
@@ -157,23 +244,50 @@ class ProfileActivity : Activity() {
 
     private fun showLoginNeeded() {
         binding.statusText.setText(R.string.profile_needs_login)
-        showUnlockButton(getString(R.string.login), WebPlayerActivity.LOGIN_URL)
+        showAction(getString(R.string.login)) { openToUnlock(WebPlayerActivity.LOGIN_URL) }
     }
 
     /** TikTok wants a captcha solved first; open the page on screen so the user can do it. */
-    private fun showVerificationNeeded() {
+    private fun showVerificationNeeded(takeFocus: Boolean = true) {
         binding.statusText.setText(R.string.profile_needs_verification)
-        showUnlockButton(getString(R.string.verify), ProfileDirectory.profileUrl(username))
+        showAction(getString(R.string.verify), takeFocus) { openToUnlock(ProfileDirectory.profileUrl(username)) }
     }
 
-    private fun showUnlockButton(label: String, url: String) {
+    private fun openToUnlock(url: String) {
+        awayToUnlock = true
+        startActivity(WebPlayerActivity.intent(this, url))
+    }
+
+    private fun showAction(label: String, takeFocus: Boolean = true, onClick: () -> Unit) {
         binding.btnLogin.text = label
-        binding.btnLogin.setOnClickListener {
-            awayToUnlock = true
-            startActivity(WebPlayerActivity.intent(this, url))
-        }
+        binding.btnLogin.setOnClickListener { onClick() }
         binding.btnLogin.visibility = View.VISIBLE
-        binding.btnLogin.requestFocus()
+        if (takeFocus || currentFocus == null) binding.btnLogin.requestFocus()
+    }
+
+    private fun hideAction() {
+        binding.btnLogin.visibility = View.GONE
+    }
+
+    /** Last tile of the embed grid: asks for older posts from the full page. */
+    private fun olderPostsCard(): View = Button(this).apply {
+        text = getString(R.string.profile_older_posts)
+        isAllCaps = false
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, OLDER_TEXT_SP)
+        setTextColor(getColorStateList(R.color.btn_chooser_text))
+        setBackgroundResource(R.drawable.btn_chooser_bg)
+        layoutParams = GridLayout.LayoutParams().apply {
+            width = cardWidth
+            height = dp(OLDER_CARD_HEIGHT_DP)
+            val gap = dp(CARD_GAP_DP)
+            setMargins(gap, gap, gap, gap)
+        }
+        setOnClickListener { requestFullPage() }
+    }.also { olderCard = it }
+
+    private fun removeOlderPostsCard() {
+        olderCard?.let(binding.grid::removeView)
+        olderCard = null
     }
 
     private fun showPosts(found: List<ProfilePost>) {
@@ -182,12 +296,11 @@ class ProfileActivity : Activity() {
         updateCount()
         binding.gridScroll.scrollTo(0, 0)
         binding.grid.getChildAt(0)?.requestFocus()
-        // A short first screen leaves nothing to scroll to, so fetch more right away.
-        if (found.size < binding.grid.columnCount * 2) loadMore()
     }
 
     private fun updateCount() {
-        binding.statusText.text = getString(R.string.profile_posts, posts.size)
+        val text = if (webMode) R.string.profile_posts else R.string.profile_posts_latest
+        binding.statusText.text = getString(text, posts.size)
     }
 
     private fun card(post: ProfilePost, index: Int): View {
@@ -224,6 +337,8 @@ class ProfileActivity : Activity() {
         private const val FIRST_SCREEN_TARGET = 12
         private const val THUMB_WIDTH_DP = 140
         private const val CARD_GAP_DP = 6
+        private const val OLDER_CARD_HEIGHT_DP = 194
+        private const val OLDER_TEXT_SP = 18f
 
         fun intent(context: Context, username: String): Intent =
             Intent(context, ProfileActivity::class.java).putExtra(EXTRA_USERNAME, username)

@@ -66,7 +66,9 @@ class WebPlayerActivity : android.app.Activity() {
             binding.webView.loadUrl(intent.getStringExtra(EXTRA_URL) ?: DEFAULT_URL)
         }
 
-        binding.root.post { centerCursor() }
+        // On the QR login page a centred pointer would sit on the code and spoil the scan, so it
+        // stays hidden there until an arrow key is pressed.
+        if (intent.getStringExtra(EXTRA_URL) != LOGIN_URL) binding.root.post { centerCursor() }
     }
 
     // --- D-pad pointer ----------------------------------------------------------------------

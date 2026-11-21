@@ -16,6 +16,7 @@ object LiveProfiles {
 
     private const val THOUSAND = 1_000L
     private const val MILLION = 1_000_000L
+    private const val BILLION = 1_000_000_000L
 
     /** Read api-live/user/room; null when there is no user in it. Pure; unit-tested. */
     fun parse(body: String?): LiveProfile? = runCatching {
@@ -39,9 +40,10 @@ object LiveProfiles {
         avatarUrl = channel.avatarUrl ?: profile.avatarUrl,
     )
 
-    /** 109 → "109", 23761 → "23.7K", 1250000 → "1.2M" (truncated, like TikTok). Pure. */
+    /** 109 → "109", 23761 → "23.7K", 1250000 → "1.2M", 2.6e9 → "2.6B" (truncated). Pure. */
     fun formatViewers(count: Long): String {
         val (unit, suffix) = when {
+            count >= BILLION -> BILLION to "B"
             count >= MILLION -> MILLION to "M"
             count >= THOUSAND -> THOUSAND to "K"
             else -> return count.toString()
