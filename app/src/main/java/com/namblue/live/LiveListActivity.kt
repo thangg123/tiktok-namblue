@@ -184,7 +184,7 @@ class LiveListActivity : Activity() {
     private fun startSearch() {
         if (!reader.isLoggedIn()) {
             dialog = TvDialogs.confirm(this, getString(R.string.search_login_prompt), getString(R.string.login)) {
-                startActivity(WebPlayerActivity.intent(this, LOGIN_URL))
+                startActivity(WebPlayerActivity.intent(this, WebPlayerActivity.LOGIN_URL))
             }
             return
         }
@@ -336,7 +336,6 @@ class LiveListActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private companion object {
-        const val LOGIN_URL = "https://www.tiktok.com/login/qrcode"
         const val LOAD_TIMEOUT_MS = 25_000L
         const val POLL_INTERVAL_MS = 1_000L
         const val MAX_CATEGORIES = 14

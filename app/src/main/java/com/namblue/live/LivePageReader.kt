@@ -11,7 +11,8 @@ import kotlinx.coroutines.delay
 import java.io.ByteArrayInputStream
 
 /**
- * Drives the invisible WebView that reads TikTok LIVE pages (see [LiveDirectory] for why).
+ * Drives the invisible WebView that reads TikTok pages — the live feed ([LiveDirectory]) and
+ * profiles ([ProfileDirectory]) — since TikTok's list APIs only answer its own page scripts.
  *
  * The page's own video previews are blocked at the network layer: nobody sees them, and on a
  * TV they would compete with the real preview for bandwidth and the hardware decoder.
@@ -49,10 +50,10 @@ class LivePageReader(private val webView: WebView) {
         finished.await()
     }
 
-    /** Raw [LiveDirectory.SCRAPE_JS] output for what the page shows right now. */
-    suspend fun read(): String? {
+    /** Raw output of [script] (by default [LiveDirectory.SCRAPE_JS]) for what the page shows now. */
+    suspend fun read(script: String = LiveDirectory.SCRAPE_JS): String? {
         val result = CompletableDeferred<String?>()
-        webView.evaluateJavascript(LiveDirectory.SCRAPE_JS) { result.complete(it) }
+        webView.evaluateJavascript(script) { result.complete(it) }
         return result.await()
     }
 

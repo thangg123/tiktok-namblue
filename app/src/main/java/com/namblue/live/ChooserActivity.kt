@@ -9,8 +9,8 @@ import android.widget.Toast
 import com.namblue.live.databinding.ActivityChooserBinding
 
 /**
- * Launcher screen: a black screen with three D-pad-focusable buttons — NamBlue's live, "Other"
- * (type any username) and "Đang LIVE" (browse who is live now). Pick one with the remote's OK.
+ * Launcher screen: four D-pad-focusable buttons — NamBlue's live, "Other" (type any username),
+ * "Đang LIVE" (browse who is live now) and "Trang cá nhân" (a creator's videos and photos).
  *
  * No touch is assumed — this is built for an Android TV remote (D-pad + OK). The TikTok
  * button is focused by default; LEFT/RIGHT moves between them.
@@ -29,6 +29,7 @@ class ChooserActivity : Activity() {
         binding.btnNamblue.setOnClickListener { startActivity(Intent(this, PlayerActivity::class.java)) }
         binding.btnOther.setOnClickListener { startActivity(Intent(this, UsernameActivity::class.java)) }
         binding.btnBrowse.setOnClickListener { startActivity(Intent(this, LiveListActivity::class.java)) }
+        binding.btnProfiles.setOnClickListener { startActivity(Intent(this, ProfileSearchActivity::class.java)) }
         binding.btnNamblue.requestFocus()
     }
 

@@ -17,6 +17,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Toast
 import com.namblue.live.databinding.ActivityWebPlayerBinding
 
 /**
@@ -26,7 +27,8 @@ import com.namblue.live.databinding.ActivityWebPlayerBinding
  * resolve those, so we hand off to TikTok's own web player where the user logs in + confirms age.
  *
  * The web page isn't D-pad-navigable, so an on-screen pointer is driven with the remote
- * (arrows move it, OK taps, top/bottom edges scroll). JavaScript autoplay is on and HTML5
+ * (arrows move it, OK taps, top/bottom edges scroll; hold OK to drag, e.g. a slider).
+ * JavaScript autoplay is on and HTML5
  * video can go fullscreen. Cookies persist, so any login is only done once — after a TikTok
  * login, the native resolver reuses those cookies and can play gated lives natively.
  */
@@ -81,13 +83,22 @@ class WebPlayerActivity : android.app.Activity() {
                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
                 -> {
-                    if (event.action == KeyEvent.ACTION_DOWN) moveCursor(event.keyCode, event.repeatCount)
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        moveCursor(event.keyCode, event.repeatCount)
+                        if (dragStartMs != null) touchAtCursor(MotionEvent.ACTION_MOVE)
+                    }
                     return true
                 }
 
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
-                    if (event.action == KeyEvent.ACTION_UP) tapAtCursor()
+                    onOkKey(event)
+                    return true
+                }
+
+                KeyEvent.KEYCODE_BACK -> if (dragStartMs != null) {
+                    // Back first drops a drag in progress instead of leaving the page mid-gesture.
+                    if (event.action == KeyEvent.ACTION_UP) endDrag(MotionEvent.ACTION_CANCEL)
                     return true
                 }
             }
@@ -121,6 +132,45 @@ class WebPlayerActivity : android.app.Activity() {
         if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && ny > maxY) binding.webView.scrollBy(0, step.toInt())
         binding.cursor.x = nx.coerceIn(0f, maxX)
         binding.cursor.y = ny.coerceIn(0f, maxY)
+    }
+
+    // --- Drag (for sliders such as TikTok's "drag the slider" check) --------------------------
+    //
+    // Holding OK presses down at the pointer; the arrows then drag; the next OK releases.
+
+    /** Down-time of the drag in progress, or null when not dragging. */
+    private var dragStartMs: Long? = null
+
+    /** True while the OK press that started a drag is still held, so its release is ignored. */
+    private var okStartedDrag = false
+
+    private fun onOkKey(event: KeyEvent) {
+        when {
+            event.action == KeyEvent.ACTION_DOWN && event.repeatCount == DRAG_HOLD_REPEATS && dragStartMs == null -> {
+                dragStartMs = SystemClock.uptimeMillis()
+                okStartedDrag = true
+                touchAtCursor(MotionEvent.ACTION_DOWN)
+                Toast.makeText(this, R.string.web_drag_start, Toast.LENGTH_SHORT).show()
+            }
+            event.action != KeyEvent.ACTION_UP -> Unit
+            okStartedDrag -> okStartedDrag = false
+            dragStartMs != null -> endDrag(MotionEvent.ACTION_UP)
+            else -> tapAtCursor()
+        }
+    }
+
+    private fun endDrag(action: Int) {
+        touchAtCursor(action)
+        dragStartMs = null
+        okStartedDrag = false
+    }
+
+    private fun touchAtCursor(action: Int) {
+        val downTime = dragStartMs ?: return
+        val x = binding.cursor.x + CURSOR_TIP
+        val y = binding.cursor.y + CURSOR_TIP
+        MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
+            .also { binding.webView.dispatchTouchEvent(it); it.recycle() }
     }
 
     private fun tapAtCursor() {
@@ -248,12 +298,16 @@ class WebPlayerActivity : android.app.Activity() {
         const val EXTRA_URL = "url"
         private const val DEFAULT_URL = "https://www.tiktok.com/@namblueraudua/live"
 
+        /** TikTok's QR-code login: scan it with the TikTok app on a phone, no typing on the TV. */
+        const val LOGIN_URL = "https://www.tiktok.com/login/qrcode"
+
         // Pointer movement tuning (pixels).
         private const val CURSOR_STEP = 55f          // base move per key press
         private const val CURSOR_ACCEL = 14f         // extra per repeat (holding a direction)
         private const val CURSOR_STEP_MAX = 260f     // cap on the accelerated step
         private const val CURSOR_MARGIN = 8          // keep the tip on-screen
         private const val CURSOR_TIP = 4f            // offset of the arrow tip from the view origin
+        private const val DRAG_HOLD_REPEATS = 3      // key repeats of a held OK before it starts a drag
 
         fun intent(context: Context, url: String): Intent =
             Intent(context, WebPlayerActivity::class.java).putExtra(EXTRA_URL, url)
