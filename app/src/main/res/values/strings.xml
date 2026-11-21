@@ -9,6 +9,9 @@
     <string name="history_title">Đã xem</string>
     <string name="history_hint">Nhấn giữ OK để xoá khỏi lịch sử</string>
     <string name="history_item">\@%1$s</string>
+    <string name="history_confirm_delete">Xoá \@%1$s khỏi lịch sử đã xem?</string>
+    <string name="cancel">Huỷ</string>
+    <string name="delete">Xoá</string>
     <string name="history_deleted">Đã xoá @%1$s khỏi lịch sử</string>
     <string name="status_connecting">Đang kết nối…</string>
     <string name="status_waiting_live">Đang chờ live…</string>
