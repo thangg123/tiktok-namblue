@@ -12,24 +12,41 @@ import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import androidx.media3.common.util.UnstableApi
 import com.namblue.live.databinding.ActivityPostPlayerBinding
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 /**
- * Plays a creator's posts one after another in TikTok's official embed player, TikTok-style:
- * DOWN/UP = next/previous post, OK = pause/play, BACK = return to the grid. LEFT/RIGHT flip
- * through the pictures of a photo post, and move between posts on a video.
- * A video that finishes moves on to the next post by itself.
+ * Plays a creator's posts one after another, TikTok-style: DOWN/UP = next/previous post,
+ * OK = pause/play, BACK = return to the grid. LEFT/RIGHT flip through the pictures of a photo
+ * post, and move between posts on a video. A finished post moves on to the next by itself.
  *
- * The player is hosted in an iframe of a tiny local page so the app can steer it through the
- * player's postMessage API and hear its state changes.
+ * Videos play in TikTok's official embed player, hosted in an iframe of a tiny local page so the
+ * app can steer it through the player's postMessage API and hear its state changes. Photo albums
+ * whose pictures are known (logged-in post list) are shown by [AlbumPlayer] instead, because the
+ * embed player's carousel can't be paused.
  */
+@UnstableApi
 class PostPlayerActivity : Activity() {
 
     private lateinit var binding: ActivityPostPlayerBinding
     private lateinit var ids: List<String>
     private lateinit var photoIds: Set<String>
+    private var postsById: Map<String, ProfilePost> = emptyMap()
+    private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private lateinit var album: AlbumPlayer
+
+    /** True while the current post is an album shown by [album] rather than the web player. */
+    private var albumMode = false
     private var index = 0
-    private var playing = false
+    /**
+     * Toggled by OK. Posts autoplay, so it starts false and the first OK always pauses —
+     * whatever the player reports meanwhile (buffering, playing). While set, "⏸" stays on screen.
+     */
+    private var pausedByUser = false
     private val hideOverlay = Runnable { binding.overlay.visibility = View.GONE }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -44,6 +61,15 @@ class PostPlayerActivity : Activity() {
             finish()
             return
         }
+        postsById = PostQueue.posts.associateBy { it.id }
+        album = AlbumPlayer(
+            context = this,
+            imageView = binding.albumImage,
+            scope = uiScope,
+            targetPx = resources.displayMetrics.heightPixels,
+            onPicture = ::onAlbumPicture,
+            onFinished = { step(+1) },
+        )
         CookieManager.getInstance().setAcceptThirdPartyCookies(binding.playerWeb, true)
         binding.playerWeb.apply {
             settings.javaScriptEnabled = true
@@ -59,15 +85,19 @@ class PostPlayerActivity : Activity() {
 
     override fun onPause() {
         binding.playerWeb.onPause()
+        if (albumMode) album.setPaused(true)
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
         binding.playerWeb.onResume()
+        if (albumMode) album.setPaused(pausedByUser)
     }
 
     override fun onDestroy() {
+        if (::album.isInitialized) album.stop()
+        uiScope.cancel()
         binding.overlay.removeCallbacks(hideOverlay)
         binding.playerWeb.loadUrl(BLANK_PAGE)
         binding.playerWeb.destroy()
@@ -93,8 +123,19 @@ class PostPlayerActivity : Activity() {
                 if (isDown) sideways(-1)
                 return true
             }
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                if (event.action == KeyEvent.ACTION_UP) togglePlay()
+            // TV remotes send OK as any of these; some also have dedicated play/pause keys.
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            -> {
+                if (event.action == KeyEvent.ACTION_UP) setPaused(!pausedByUser)
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                if (event.action == KeyEvent.ACTION_UP) setPaused(true)
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                if (event.action == KeyEvent.ACTION_UP) setPaused(false)
                 return true
             }
         }
@@ -103,7 +144,11 @@ class PostPlayerActivity : Activity() {
 
     /** A photo post flips its pictures; anything else moves between posts. */
     private fun sideways(delta: Int) {
-        if (ids[index] in photoIds) flipPhoto(delta) else step(delta)
+        when {
+            albumMode -> album.flip(delta)
+            ids[index] in photoIds -> flipPhoto(delta)
+            else -> step(delta)
+        }
     }
 
     /**
@@ -126,8 +171,20 @@ class PostPlayerActivity : Activity() {
 
     private fun show(position: Int) {
         index = position
-        playing = false
-        binding.playerWeb.loadDataWithBaseURL(HOST_BASE, hostPage(ids[position]), "text/html", "utf-8", null)
+        pausedByUser = false
+        album.stop()
+        val post = postsById[ids[position]]
+        albumMode = post != null && post.kind == PostKind.PHOTO && post.images.isNotEmpty()
+        if (albumMode && post != null) {
+            binding.playerWeb.loadUrl(BLANK_PAGE)
+            binding.playerWeb.visibility = View.INVISIBLE
+            binding.albumImage.visibility = View.VISIBLE
+            album.start(post)
+        } else {
+            binding.albumImage.visibility = View.GONE
+            binding.playerWeb.visibility = View.VISIBLE
+            binding.playerWeb.loadDataWithBaseURL(HOST_BASE, hostPage(ids[position]), "text/html", "utf-8", null)
+        }
         val hint = if (ids[position] in photoIds) R.string.post_position_photo else R.string.post_position
         binding.overlay.text = getString(hint, position + 1, ids.size)
         binding.overlay.visibility = View.VISIBLE
@@ -135,12 +192,30 @@ class PostPlayerActivity : Activity() {
         binding.overlay.postDelayed(hideOverlay, OVERLAY_MS)
     }
 
-    private fun togglePlay() {
-        binding.playerWeb.evaluateJavascript("command('${if (playing) "pause" else "play"}')", null)
+    /** Manual flips get a brief "Ảnh 2/6" so the viewer knows where they are in the album. */
+    private fun onAlbumPicture(number: Int, total: Int) {
+        if (pausedByUser || number == 1) return
+        binding.overlay.removeCallbacks(hideOverlay)
+        binding.overlay.text = getString(R.string.album_picture, number, total)
+        binding.overlay.visibility = View.VISIBLE
+        binding.overlay.postDelayed(hideOverlay, BADGE_MS)
+    }
+
+    private fun setPaused(pause: Boolean) {
+        pausedByUser = pause
+        if (albumMode) {
+            album.setPaused(pause)
+        } else {
+            binding.playerWeb.evaluateJavascript("command('${if (pause) "pause" else "play"}')", null)
+        }
+        binding.overlay.removeCallbacks(hideOverlay)
+        binding.overlay.text = getString(if (pause) R.string.post_paused else R.string.post_resumed)
+        binding.overlay.visibility = View.VISIBLE
+        // Paused: keep the badge up so it's obvious why nothing moves. Resumed: show it briefly.
+        if (!pause) binding.overlay.postDelayed(hideOverlay, BADGE_MS)
     }
 
     private fun onPlayerState(state: Int) {
-        playing = state == STATE_PLAYING
         if (state == STATE_ENDED) step(+1)
     }
 
@@ -168,10 +243,11 @@ class PostPlayerActivity : Activity() {
 
         // Embed player states (TikTok player API).
         private const val STATE_ENDED = 0
-        private const val STATE_PLAYING = 1
+        private const val BADGE_MS = 1_200L
 
         fun intent(context: Context, posts: List<ProfilePost>, index: Int): Intent =
             Intent(context, PostPlayerActivity::class.java)
+                .also { PostQueue.posts = posts }
                 .putStringArrayListExtra(EXTRA_IDS, ArrayList(posts.map { it.id }))
                 .putStringArrayListExtra(EXTRA_PHOTO_IDS, ArrayList(posts.filter { it.kind == PostKind.PHOTO }.map { it.id }))
                 .putExtra(EXTRA_INDEX, index)

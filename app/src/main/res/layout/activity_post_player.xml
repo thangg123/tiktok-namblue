@@ -12,6 +12,16 @@
         android:layout_height="match_parent"
         android:focusable="false" />
 
+    <!-- Photo albums are shown here by the app itself (see AlbumPlayer), not by the web player. -->
+    <ImageView
+        android:id="@+id/albumImage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/overlay"
         android:layout_width="wrap_content"

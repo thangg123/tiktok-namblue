@@ -52,6 +52,9 @@
     <string name="post_photo">ẢNH</string>
     <string name="post_views">▶ %1$s</string>
     <string name="post_position">%1$d / %2$d  ·  ▲ ▼ ◀ ▶ chuyển bài  ·  OK dừng/phát</string>
+    <string name="album_picture">Ảnh %1$d / %2$d</string>
+    <string name="post_paused">⏸  Tạm dừng — bấm OK để xem tiếp</string>
+    <string name="post_resumed">▶  Tiếp tục</string>
     <string name="post_position_photo">%1$d / %2$d  ·  ◀ ▶ lật ảnh  ·  ▲ ▼ chuyển bài</string>
     <string name="preview_offline">Kênh này vừa tắt live</string>
     <string name="preview_restricted">Live giới hạn độ tuổi — bấm OK để xem</string>

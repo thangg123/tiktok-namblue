@@ -10,17 +10,17 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
- * Downloads small channel avatars for the live list, downscaled to roughly [targetPx] and kept
- * in a small in-memory cache. Any failure returns null — the card keeps its round placeholder.
+ * Downloads images (avatars, post covers, album pictures), downscaled to roughly [targetPx] and
+ * kept in a small in-memory cache. Any failure returns null — the view keeps its placeholder.
  */
-class AvatarLoader(private val targetPx: Int) {
+class AvatarLoader(private val targetPx: Int, cacheEntries: Int = CACHE_ENTRIES) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
-    private val cache = LruCache<String, Bitmap>(CACHE_ENTRIES)
+    private val cache = LruCache<String, Bitmap>(cacheEntries)
 
     suspend fun load(url: String): Bitmap? {
         cache.get(url)?.let { return it }
@@ -53,6 +53,6 @@ class AvatarLoader(private val targetPx: Int) {
     private companion object {
         const val TIMEOUT_SECONDS = 10L
         const val CACHE_ENTRIES = 80
-        const val MAX_BYTES = 2 * 1024 * 1024
+        const val MAX_BYTES = 6 * 1024 * 1024
     }
 }

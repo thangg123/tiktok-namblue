@@ -59,7 +59,11 @@ class ProfileActivity : Activity() {
             finish()
             return
         }
-        reader = LivePageReader(binding.scrapeView).also { it.setUp() }
+        reader = LivePageReader(binding.scrapeView).also {
+            it.setUp()
+            // Keep a copy of the post lists the full page fetches: every cover, count and type.
+            it.addStartScript(ProfileFeed.CAPTURE_JS)
+        }
         WatchHistory.record(this, username, WatchHistory.PROFILES)
         binding.username.text = getString(R.string.history_item, username)
         binding.nickname.text = username
@@ -163,48 +167,93 @@ class ProfileActivity : Activity() {
         removeOlderPostsCard()
         binding.statusText.setText(R.string.profile_loading_full)
         loadJob = uiScope.launch {
-            val raw = withTimeoutOrNull(LOAD_TIMEOUT_MS) { firstScreen() }
+            val screen = withTimeoutOrNull(LOAD_TIMEOUT_MS) { firstScreen() }
             loading = false
-            val header = ProfileDirectory.parseHeader(raw)
+            val header = ProfileDirectory.parseHeader(screen?.raw)
             if (posts.isEmpty()) header?.let(::showHeader)
-            val fresh = newPosts(ProfileDirectory.parsePosts(raw))
+            screen?.hasMore?.let { hasMore = it }
+            screen?.let { enrich(it.posts) }
+            val fresh = newPosts(screen?.posts.orEmpty())
             when {
                 fresh.isNotEmpty() -> appendPosts(fresh)
                 header?.needsVerification == true -> showVerificationNeeded(takeFocus = !quietly)
                 header?.needsLogin == true -> showLoginNeeded()
-                raw == null -> binding.statusText.setText(R.string.profile_failed)
+                screen == null -> binding.statusText.setText(R.string.profile_failed)
                 else -> loadMore() // the full page starts with the posts we already show
             }
         }
     }
 
-    /** Poll until the grid settles (enough posts, or no growth between polls) or a wall shows. */
-    private suspend fun firstScreen(): String? {
+    /** What the full page shows: its raw dump (for the header and walls) and its posts. */
+    private class WebScreen(val raw: String?, val posts: List<ProfilePost>, val hasMore: Boolean?)
+
+    /**
+     * The page's posts: from its captured post-list data when there is some (covers for every
+     * post, an exact end-of-list flag), else from the rendered grid.
+     */
+    private suspend fun readWebScreen(): WebScreen {
+        val raw = reader.read(ProfileDirectory.SCRAPE_JS)
+        val feed = ProfileFeed.parse(reader.read(ProfileFeed.READ_JS))
+        return if (feed.posts.isNotEmpty()) {
+            WebScreen(raw, feed.posts, feed.hasMore)
+        } else {
+            WebScreen(raw, ProfileDirectory.parsePosts(raw), hasMore = null)
+        }
+    }
+
+    /** Poll until the posts settle (enough of them, or no growth between polls) or a wall shows. */
+    private suspend fun firstScreen(): WebScreen {
         reader.open(ProfileDirectory.profileUrl(username))
         var previous = -1
         while (true) {
             delay(POLL_INTERVAL_MS)
-            val raw = reader.read(ProfileDirectory.SCRAPE_JS)
-            val header = ProfileDirectory.parseHeader(raw)
-            if (header?.needsLogin == true || header?.needsVerification == true) return raw
-            val count = ProfileDirectory.parsePosts(raw).size
-            if (count > 0 && (count >= FIRST_SCREEN_TARGET || count == previous)) return raw
+            val screen = readWebScreen()
+            val header = ProfileDirectory.parseHeader(screen.raw)
+            if (header?.needsLogin == true || header?.needsVerification == true) return screen
+            val count = screen.posts.size
+            if (count > 0 && (count >= FIRST_SCREEN_TARGET || count == previous)) return screen
             previous = count
         }
     }
 
-    /** Full-page mode only: scroll the page so TikTok appends older posts. */
+    /**
+     * Full-page mode only: scroll the page so TikTok fetches the next posts, then wait for them —
+     * a page of posts can take several seconds. Only TikTok's own "no more" flag ends the list;
+     * a slow page just leaves it to be tried again on the next visit to the last row.
+     */
     private fun loadMore() {
         if (!webMode || !hasMore || loading || moreJob?.isActive == true) return
+        binding.statusText.setText(R.string.profile_loading_full)
         moreJob = uiScope.launch {
             reader.scrollForMore()
-            val fresh = newPosts(ProfileDirectory.parsePosts(reader.read(ProfileDirectory.SCRAPE_JS)))
-            if (fresh.isEmpty()) {
-                hasMore = false
-                binding.statusText.text = getString(R.string.profile_no_more, posts.size)
-                return@launch
+            repeat(MORE_ATTEMPTS) {
+                val screen = readWebScreen()
+                screen.hasMore?.let { hasMore = it }
+                enrich(screen.posts)
+                val fresh = newPosts(screen.posts)
+                if (fresh.isNotEmpty()) {
+                    appendPosts(fresh)
+                    return@launch
+                }
+                if (!hasMore) {
+                    binding.statusText.text = getString(R.string.profile_no_more, posts.size)
+                    return@launch
+                }
+                delay(POLL_INTERVAL_MS)
             }
-            appendPosts(fresh)
+            updateCount()
+        }
+    }
+
+    /**
+     * The first posts came from the embed, which has no album pictures; once the logged-in post
+     * list arrives, give those posts its pictures and music so the player can show the albums.
+     */
+    private fun enrich(found: List<ProfilePost>) {
+        val details = found.filter { it.images.isNotEmpty() || it.musicUrl != null }.associateBy { it.id }
+        if (details.isEmpty()) return
+        posts = posts.map { post ->
+            details[post.id]?.let { post.copy(images = it.images, musicUrl = it.musicUrl) } ?: post
         }
     }
 
@@ -335,6 +384,7 @@ class ProfileActivity : Activity() {
         private const val LOAD_TIMEOUT_MS = 25_000L
         private const val POLL_INTERVAL_MS = 1_200L
         private const val FIRST_SCREEN_TARGET = 12
+        private const val MORE_ATTEMPTS = 6
         private const val THUMB_WIDTH_DP = 140
         private const val CARD_GAP_DP = 6
         private const val OLDER_CARD_HEIGHT_DP = 194

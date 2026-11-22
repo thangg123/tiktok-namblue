@@ -27,14 +27,19 @@ object ProfileFeed {
           function slim(it) {
             it = it || {};
             var v = it.video || {}, ip = it.imagePost;
+            var images = ip && ip.images ? ip.images.map(function (im) {
+              return { imageURL: { urlList: [first(im && im.imageURL && im.imageURL.urlList)] } };
+            }) : [];
             return {
               id: String(it.id || ''), desc: it.desc || '',
               author: { uniqueId: (it.author && it.author.uniqueId) || '' },
               video: { cover: v.cover || '', originCover: v.originCover || '' },
               stats: { playCount: it.stats ? it.stats.playCount : null },
               statsV2: { playCount: it.statsV2 ? it.statsV2.playCount : null },
+              music: { playUrl: (it.music && it.music.playUrl) || '' },
               imagePost: ip ? { cover: { imageURL: { urlList: [first(ip.cover && ip.cover.imageURL && ip.cover.imageURL.urlList)
-                || first(ip.images && ip.images[0] && ip.images[0].imageURL && ip.images[0].imageURL.urlList)] } } } : null
+                || first(ip.images && ip.images[0] && ip.images[0].imageURL && ip.images[0].imageURL.urlList)] } },
+                images: images } : null
             };
           }
           function record(json) {
@@ -99,7 +104,17 @@ object ProfileFeed {
             thumbUrl = thumb?.takeIf { it.startsWith("https://") },
             caption = item.optString("desc", "").trim().ifEmpty { null },
             views = playCount(item)?.let(LiveProfiles::formatViewers),
+            images = album?.let(::albumImages).orEmpty(),
+            musicUrl = item.optJSONObject("music")?.optString("playUrl", "")?.takeIf { it.startsWith("https://") },
         )
+    }
+
+    private fun albumImages(album: JSONObject): List<String> {
+        val images = album.optJSONArray("images") ?: return emptyList()
+        return (0 until images.length()).mapNotNull { i ->
+            images.optJSONObject(i)?.optJSONObject("imageURL")?.optJSONArray("urlList")?.optString(0, "")
+                ?.takeIf { it.startsWith("https://") }
+        }
     }
 
     /** stats.playCount is a number; the newer statsV2.playCount is the same count as a string. */

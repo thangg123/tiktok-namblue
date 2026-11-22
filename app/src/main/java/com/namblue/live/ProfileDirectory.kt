@@ -16,6 +16,10 @@ data class ProfilePost(
     val caption: String?,
     /** View count as TikTok displays it ("1.2M"), or null. */
     val views: String?,
+    /** A photo album's pictures, in order — known only from the logged-in post list. */
+    val images: List<String> = emptyList(),
+    /** A photo album's background music. */
+    val musicUrl: String? = null,
 )
 
 /**

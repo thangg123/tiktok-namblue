@@ -20,17 +20,20 @@ class ProfileFeedTest {
         .put("video", JSONObject().put("cover", cover).put("originCover", "https://p16/origin-$id.jpeg"))
         .apply { views?.let { put("stats", JSONObject().put("playCount", it)) } }
 
+    private fun urls(vararg list: String) = JSONObject().put("imageURL", JSONObject().put("urlList", JSONArray(list.toList())))
+
+    /** Captured shape (CAPTURE_JS keeps the first address of each picture and the music link). */
     private fun photo(id: String) = JSONObject()
         .put("id", id).put("desc", "album")
         .put("author", JSONObject().put("uniqueId", "khaby.lame"))
         .put("video", JSONObject().put("cover", ""))
         .put("statsV2", JSONObject().put("playCount", "184800"))
+        .put("music", JSONObject().put("playUrl", "https://sf16/music.mp3"))
         .put(
             "imagePost",
-            JSONObject().put(
-                "cover",
-                JSONObject().put("imageURL", JSONObject().put("urlList", JSONArray().put("https://p16/album-cover.jpeg"))),
-            ),
+            JSONObject()
+                .put("cover", urls("https://p16/album-cover.jpeg"))
+                .put("images", JSONArray().put(urls("https://p16/1.jpeg")).put(urls("https://p16/2.jpeg")).put(urls("http://insecure/3.jpeg"))),
         )
 
     /** What CAPTURE_JS keeps: every captured page, in order, with TikTok's hasMore flag. */
@@ -52,7 +55,10 @@ class ProfileFeedTest {
         assertEquals(
             listOf(
                 ProfilePost("7709194461913419038", "khaby.lame", PostKind.VIDEO, "https://p16/7709194461913419038.jpeg", "video 7709194461913419038", "1.2M"),
-                ProfilePost("7704774145829063967", "khaby.lame", PostKind.PHOTO, "https://p16/album-cover.jpeg", "album", "184.8K"),
+                ProfilePost(
+                    "7704774145829063967", "khaby.lame", PostKind.PHOTO, "https://p16/album-cover.jpeg", "album", "184.8K",
+                    images = listOf("https://p16/1.jpeg", "https://p16/2.jpeg"), musicUrl = "https://sf16/music.mp3",
+                ),
             ),
             feed.posts,
         )
