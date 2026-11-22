@@ -21,6 +21,7 @@
     <string name="search_empty">Không tìm thấy phiên LIVE nào cho \"%1$s\".</string>
     <string name="search_login_prompt">Tìm kiếm cần đăng nhập TikTok một lần. Mở trang đăng nhập (quét mã QR bằng điện thoại)?</string>
     <string name="login">Đăng nhập</string>
+    <string name="login_done">Đã đăng nhập TikTok</string>
     <string name="preview_loading">Đang tải…</string>
     <string name="source_profiles">Trang cá nhân</string>
     <string name="profile_search_title">Xem trang cá nhân TikTok</string>

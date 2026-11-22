@@ -68,7 +68,11 @@ class WebPlayerActivity : android.app.Activity() {
 
         // On the QR login page a centred pointer would sit on the code and spoil the scan, so it
         // stays hidden there until an arrow key is pressed.
-        if (intent.getStringExtra(EXTRA_URL) != LOGIN_URL) binding.root.post { centerCursor() }
+        if (isLoginPage) {
+            binding.root.postDelayed(watchForLogin, LOGIN_CHECK_MS)
+        } else {
+            binding.root.post { centerCursor() }
+        }
     }
 
     // --- D-pad pointer ----------------------------------------------------------------------
@@ -212,7 +216,27 @@ class WebPlayerActivity : android.app.Activity() {
         binding.webView.onResume()
     }
 
+    private val isLoginPage: Boolean by lazy { intent.getStringExtra(EXTRA_URL) == LOGIN_URL }
+
+    /**
+     * On the login page: once TikTok has set the session cookie (the QR code was scanned and
+     * confirmed on the phone), go straight back to the app instead of leaving the viewer on
+     * TikTok's own feed.
+     */
+    private val watchForLogin = object : Runnable {
+        override fun run() {
+            if (LiveDirectory.isLoggedIn(CookieManager.getInstance().getCookie(TIKTOK_HOME))) {
+                CookieManager.getInstance().flush()
+                Toast.makeText(this@WebPlayerActivity, R.string.login_done, Toast.LENGTH_SHORT).show()
+                finish()
+            } else {
+                binding.root.postDelayed(this, LOGIN_CHECK_MS)
+            }
+        }
+    }
+
     override fun onDestroy() {
+        binding.root.removeCallbacks(watchForLogin)
         CookieManager.getInstance().flush()  // make sure the login session is saved
         binding.webView.apply {
             stopLoading()
@@ -302,6 +326,8 @@ class WebPlayerActivity : android.app.Activity() {
 
         /** TikTok's QR-code login: scan it with the TikTok app on a phone, no typing on the TV. */
         const val LOGIN_URL = "https://www.tiktok.com/login/qrcode"
+        private const val TIKTOK_HOME = "https://www.tiktok.com"
+        private const val LOGIN_CHECK_MS = 1_000L
 
         // Pointer movement tuning (pixels).
         private const val CURSOR_STEP = 55f          // base move per key press
